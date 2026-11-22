@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "recsys:simulate": "tsx ./scripts/recsys-simulate.ts"
+    "recsys:simulate": "tsx ./scripts/recsys-simulate.ts",
+    "recsys:e2e": "NODE_ENV=production tsx ./scripts/recsys-e2e.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

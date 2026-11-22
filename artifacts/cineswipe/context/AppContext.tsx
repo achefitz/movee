@@ -2,8 +2,12 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MediaItem } from '../services/tmdb';
 
+export type Era = 'all' | 'new' | 'classic';
+
 export type Filters = {
   contentType: 'all' | 'movie' | 'tv';
+  /** 'new' = released in the last 2 years, 'classic' = released before 2000. */
+  era: Era;
   genres: number[];
   minRating: number;
   streaming: number[];
@@ -51,6 +55,7 @@ export type AppContextType = {
 
 export const defaultFilters: Filters = {
   contentType: 'all',
+  era: 'all',
   genres: [],
   minRating: 0,
   streaming: [],

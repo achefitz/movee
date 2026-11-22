@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Colors from '../constants/colors';
-import { Filters, defaultFilters } from '../context/AppContext';
+import { Era, Filters, defaultFilters } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SVC, STREAMING_FILTER_LIST } from '../constants/streaming';
@@ -12,6 +12,12 @@ interface FilterSheetProps {
   filters: Filters;
   onApply: (filters: Filters) => void;
 }
+
+const ERA_OPTIONS: Array<{ value: Era; label: string; hint: string }> = [
+  { value: 'all', label: 'ANY', hint: 'All years' },
+  { value: 'new', label: 'NEW', hint: 'Last 2 years' },
+  { value: 'classic', label: 'OLDIES', hint: 'Before 2000' },
+];
 
 const GENRES = [
   { id: 28, name: 'Action' },
@@ -104,22 +110,26 @@ export function FilterSheet({ visible, onClose, filters, onApply }: FilterSheetP
               ))}
             </View>
 
-            {/* Min Rating */}
-            <Text style={styles.sectionTitle}>Minimum Rating: {localFilters.minRating}+</Text>
-            <View style={styles.ratingRow}>
-              {[0, 5, 6, 7, 8].map((rating) => (
+            {/* Release era */}
+            <Text style={styles.sectionTitle}>Release</Text>
+            <View style={styles.segmentControl}>
+              {ERA_OPTIONS.map((opt) => (
                 <TouchableOpacity
-                  key={rating}
-                  style={[
-                    styles.ratingBubble,
-                    localFilters.minRating === rating && styles.ratingBubbleActive
-                  ]}
-                  onPress={() => setLocalFilters(prev => ({ ...prev, minRating: rating }))}
+                  key={opt.value}
+                  style={[styles.segmentButton, localFilters.era === opt.value && styles.segmentButtonActive]}
+                  onPress={() => setLocalFilters(prev => ({
+                    ...prev,
+                    era: opt.value,
+                    // Oldies are never in theaters; don't let the two cancel each other out.
+                    inTheaters: opt.value === 'classic' ? false : prev.inTheaters,
+                  }))}
                 >
-                  <Text style={[
-                    styles.ratingText,
-                    localFilters.minRating === rating && styles.ratingTextActive
-                  ]}>{rating === 0 ? 'Any' : rating + '+'}</Text>
+                  <Text style={[styles.segmentText, localFilters.era === opt.value && styles.segmentTextActive]}>
+                    {opt.label}
+                  </Text>
+                  <Text style={[styles.segmentHint, localFilters.era === opt.value && styles.segmentTextActive]}>
+                    {opt.hint}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -148,6 +158,44 @@ export function FilterSheet({ visible, onClose, filters, onApply }: FilterSheetP
               })}
             </View>
 
+            {/* Genres */}
+            <Text style={styles.sectionTitle}>Genres</Text>
+            <View style={styles.genresContainer}>
+              {GENRES.map((genre) => {
+                const isActive = localFilters.genres.includes(genre.id);
+                return (
+                  <TouchableOpacity
+                    key={genre.id}
+                    style={[styles.genrePill, isActive && styles.genrePillActive]}
+                    onPress={() => toggleGenre(genre.id)}
+                  >
+                    <Text style={[styles.genreText, isActive && styles.genreTextActive]}>
+                      {genre.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {/* Min Rating */}
+            <Text style={styles.sectionTitle}>Minimum Rating: {localFilters.minRating}+</Text>
+            <View style={styles.ratingRow}>
+              {[0, 5, 6, 7, 8].map((rating) => (
+                <TouchableOpacity
+                  key={rating}
+                  style={[
+                    styles.ratingBubble,
+                    localFilters.minRating === rating && styles.ratingBubbleActive
+                  ]}
+                  onPress={() => setLocalFilters(prev => ({ ...prev, minRating: rating }))}
+                >
+                  <Text style={[
+                    styles.ratingText,
+                    localFilters.minRating === rating && styles.ratingTextActive
+                  ]}>{rating === 0 ? 'Any' : rating + '+'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             {/* Max Runtime */}
             <Text style={styles.sectionTitle}>Max Runtime</Text>
             <Text style={styles.sectionHint}>Movies only — TV shows are unaffected</Text>
@@ -171,7 +219,11 @@ export function FilterSheet({ visible, onClose, filters, onApply }: FilterSheetP
             <Text style={styles.sectionTitle}>Availability</Text>
             <TouchableOpacity
               style={[styles.theaterToggle, localFilters.inTheaters && styles.theaterToggleActive]}
-              onPress={() => setLocalFilters(prev => ({ ...prev, inTheaters: !prev.inTheaters }))}
+              onPress={() => setLocalFilters(prev => ({
+                ...prev,
+                inTheaters: !prev.inTheaters,
+                era: !prev.inTheaters && prev.era === 'classic' ? 'all' : prev.era,
+              }))}
               activeOpacity={0.8}
             >
               <Ionicons
@@ -188,24 +240,6 @@ export function FilterSheet({ visible, onClose, filters, onApply }: FilterSheetP
               <View style={[styles.toggleDot, localFilters.inTheaters && styles.toggleDotActive]} />
             </TouchableOpacity>
 
-            {/* Genres */}
-            <Text style={styles.sectionTitle}>Genres</Text>
-            <View style={styles.genresContainer}>
-              {GENRES.map((genre) => {
-                const isActive = localFilters.genres.includes(genre.id);
-                return (
-                  <TouchableOpacity
-                    key={genre.id}
-                    style={[styles.genrePill, isActive && styles.genrePillActive]}
-                    onPress={() => toggleGenre(genre.id)}
-                  >
-                    <Text style={[styles.genreText, isActive && styles.genreTextActive]}>
-                      {genre.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
           </ScrollView>
 
           <View style={styles.footer}>
@@ -307,6 +341,11 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: '#000',
+  },
+  segmentHint: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    marginTop: 2,
   },
   ratingRow: {
     flexDirection: 'row',

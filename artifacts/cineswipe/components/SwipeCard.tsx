@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import * as Haptics from 'expo-haptics';
 import {
   View, Text, StyleSheet, Animated, PanResponder,
   Dimensions, Platform, TouchableOpacity, Linking,
@@ -14,6 +15,12 @@ import { SVC, AMC_URL } from '../constants/streaming';
 const { width: W, height: H } = Dimensions.get('window');
 const SWIPE_H = 80;
 const SWIPE_V = 100;
+/** A quick flick counts even if the card hasn't travelled the full threshold. */
+const FLICK_VX = 0.65;
+const FLICK_MIN_DX = 24;
+
+export type SwipeDirection = 'right' | 'left' | 'up';
+export type SwipeCardHandle = { swipe: (dir: SwipeDirection) => void };
 
 interface SwipeCardProps {
   item: MediaItem;
@@ -46,38 +53,60 @@ function WebIframePlayer({ ytKey, muted }: { ytKey: string; muted: boolean }) {
   });
 }
 
-export function SwipeCard({ item, trailerKey, isTop, onSwipeRight, onSwipeLeft, onSwipeUp, onPress }: SwipeCardProps) {
+export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function SwipeCard(
+  { item, trailerKey, isTop, onSwipeRight, onSwipeLeft, onSwipeUp, onPress },
+  ref,
+) {
   const position = useRef(new Animated.ValueXY()).current;
   const [isMuted, setIsMuted] = useState(true);
   const [trailerError, setTrailerError] = useState(false);
   const [isPlaying, setIsPlayingState] = useState(false);
   const isDragging = useRef(false);
   const isPlayingRef = useRef(false);
+  const leaving = useRef(false);
+  // On web both the PanResponder and the mouse fallback below see the same gesture.
+  // Whichever handles the release first stamps this so the other stands down
+  // (otherwise a swipe's mouseup is misread as a tap and opens the details sheet).
+  const releasedAt = useRef(0);
+  const claimRelease = () => {
+    if (Date.now() - releasedAt.current < 400) return false;
+    releasedAt.current = Date.now();
+    return true;
+  };
+  // The pan responder is created once; read callbacks through a ref so it never calls stale ones.
+  const cb = useRef({ onSwipeRight, onSwipeLeft, onSwipeUp });
+  cb.current = { onSwipeRight, onSwipeLeft, onSwipeUp };
 
   const setIsPlaying = (val: boolean) => {
     isPlayingRef.current = val;
     setIsPlayingState(val);
   };
 
-  const forceSwipe = (dir: 'right' | 'left' | 'up') => {
+  const forceSwipe = (dir: SwipeDirection) => {
+    if (leaving.current) return; // ignore double taps while the card is flying off
+    leaving.current = true;
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(dir === 'right' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
     const toValue =
       dir === 'right' ? { x: W + 100, y: 0 } :
       dir === 'left' ? { x: -(W + 100), y: 0 } :
       { x: 0, y: -(H + 100) };
-    Animated.timing(position, { toValue, duration: 240, useNativeDriver: false }).start(() => {
-      position.setValue({ x: 0, y: 0 });
-      if (dir === 'right') onSwipeRight();
-      else if (dir === 'left') onSwipeLeft();
-      else onSwipeUp();
+    Animated.timing(position, { toValue, duration: 220, useNativeDriver: false }).start(() => {
+      if (dir === 'right') cb.current.onSwipeRight();
+      else if (dir === 'left') cb.current.onSwipeLeft();
+      else cb.current.onSwipeUp();
     });
   };
+
+  useImperativeHandle(ref, () => ({ swipe: forceSwipe }));
 
   const resetPosition = () => {
     Animated.spring(position, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: false }).start();
   };
 
   const handleTap = () => {
-    if (isPlayingRef.current) return;
+    if (isPlayingRef.current || leaving.current) return;
     if (isTop && trailerKey && !trailerError) {
       setIsPlaying(true);
     } else {
@@ -99,17 +128,18 @@ export function SwipeCard({ item, trailerKey, isTop, onSwipeRight, onSwipeLeft, 
         position.setValue({ x: g.dx, y: g.dy });
       },
       onPanResponderRelease: (_, g) => {
+        if (!claimRelease()) return;
         if (!isDragging.current) {
           resetPosition();
           handleTap();
           return;
         }
         isDragging.current = false;
-        if (g.dx > SWIPE_H) {
+        if (g.dx > SWIPE_H || (g.vx > FLICK_VX && g.dx > FLICK_MIN_DX)) {
           forceSwipe('right');
-        } else if (g.dx < -SWIPE_H) {
+        } else if (g.dx < -SWIPE_H || (g.vx < -FLICK_VX && g.dx < -FLICK_MIN_DX)) {
           forceSwipe('left');
-        } else if (g.dy < -SWIPE_V) {
+        } else if (g.dy < -SWIPE_V || (g.vy < -FLICK_VX && g.dy < -FLICK_MIN_DX * 2)) {
           forceSwipe('up');
         } else {
           resetPosition();
@@ -141,6 +171,7 @@ export function SwipeCard({ item, trailerKey, isTop, onSwipeRight, onSwipeLeft, 
     onMouseUp: (e: any) => {
       if (!webDragState.current.active) return;
       webDragState.current.active = false;
+      if (!claimRelease()) { isDragging.current = false; return; }
       const dx = e.clientX - webDragState.current.startX;
       const dy = e.clientY - webDragState.current.startY;
       if (!isDragging.current) {
@@ -160,6 +191,7 @@ export function SwipeCard({ item, trailerKey, isTop, onSwipeRight, onSwipeLeft, 
     onMouseLeave: (e: any) => {
       if (!webDragState.current.active) return;
       webDragState.current.active = false;
+      if (!claimRelease()) { isDragging.current = false; return; }
       const dx = e.clientX - webDragState.current.startX;
       const dy = e.clientY - webDragState.current.startY;
       if (isDragging.current) {
@@ -231,6 +263,17 @@ export function SwipeCard({ item, trailerKey, isTop, onSwipeRight, onSwipeLeft, 
             </View>
             {item.year ? <Text style={styles.year}>{item.year}</Text> : null}
           </View>
+
+          {item.reason ? (
+            <View style={styles.reasonChip}>
+              <Ionicons
+                name={item.reason === 'Something different' ? 'compass' : item.reason.startsWith('Because') ? 'sparkles' : 'trending-up'}
+                size={11}
+                color={Colors.accent}
+              />
+              <Text style={styles.reasonText} numberOfLines={1}>{item.reason}</Text>
+            </View>
+          ) : null}
 
           <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
 
@@ -308,7 +351,7 @@ export function SwipeCard({ item, trailerKey, isTop, onSwipeRight, onSwipeLeft, 
       </View>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {
@@ -357,6 +400,24 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 13,
     fontWeight: '500',
+  },
+  reasonChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    maxWidth: '100%',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245,197,24,0.14)',
+    marginBottom: 6,
+  },
+  reasonText: {
+    color: Colors.accent,
+    fontSize: 11,
+    fontWeight: '700',
+    flexShrink: 1,
   },
   title: {
     fontSize: 26,

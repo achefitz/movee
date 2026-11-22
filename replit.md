@@ -25,10 +25,50 @@ Tinder-style movie & TV discovery app built with Expo/React Native.
 - **Theme**: `#0A0A0F` bg, `#F5C518` gold accent, `#2ECC71` like, `#E74C3C` skip, `#7B68EE` watched
 - **TMDB Auth**: Uses `TMDB_READ_ACCESS_TOKEN` (Bearer JWT) or falls back to `TMDB_API_KEY` (query param)
 - **Key files**:
-  - `artifacts/cineswipe/app/(tabs)/index.tsx` — Discover screen with progressive loading
-  - `artifacts/cineswipe/components/SwipeCard.tsx` — Swipe gesture + WebView YouTube trailer
-  - `artifacts/cineswipe/services/tmdb.ts` — fetchBulkContent (batch loads, callback pattern)
+  - `artifacts/cineswipe/app/(tabs)/index.tsx` — Discover screen: server-ranked deck, prefetches the next page at ≤6 cards
+  - `artifacts/cineswipe/components/SwipeCard.tsx` — Swipe gesture (drag or flick, haptics, imperative `swipe()` for buttons) + WebView YouTube trailer
+  - `artifacts/cineswipe/components/FilterSheet.tsx` — content type, release era (Any/New/Oldies), streamers, genres, rating, runtime, in theaters
+  - `artifacts/cineswipe/services/recs.ts` — recommender client: deck fetch, persisted feedback queue, history sync
+  - `artifacts/cineswipe/services/tmdb.ts` — `MediaItem` type, trailers and detail lookups via the proxy
   - `artifacts/api-server/src/routes/tmdb.ts` — TMDB proxy (uses `router.use()` not wildcard route)
+  - `artifacts/api-server/src/routes/recs.ts` — recommender API (see below)
+
+### Recommender (`artifacts/api-server/src/recsys/`)
+
+Server-side, multi-stage recommender modelled on NVIDIA's competition-winning recsys recipe
+(retrieve → feature-engineer → GBDT rank → ensemble). The app no longer ranks on-device.
+
+- **Flow per `/api/recs/deck` request** (`service.ts`):
+  1. *Candidate generation* (`candidates.ts`): TMDB Discover lists for the exact filters
+     (popular / top-rated / random deep "explore" pages), cross-user **co-visitation**
+     (titles liked by the same people, cosine-normalised, `stats.ts`), TMDB **item-to-item**
+     recommendations of recent likes, and **content-based** nearest neighbours over the cached
+     catalog (genre/era/keyword/cast vectors, `profile.ts`).
+  2. *Features* (`features.ts`): item stats, **count + target encoding** (smoothed like-rates per
+     title and genre across all users), user stats, user×item affinities (per-user genre/decade/type
+     like-rates, similarity to liked vs skipped titles, keyword/cast/provider affinity), and
+     retrieval ranks. Bump `FEATURE_VERSION` whenever features change.
+  3. *Ranking*: pass 1 on cheap metadata → fetch details (keywords, cast, runtime, US providers)
+     for the shortlist → pass 2 exact. Model = blend of a dependency-free histogram **GBDT**
+     (`gbdt.ts`) and logistic regression (`ranker.ts`); falls back to a hand-tuned prior.
+  4. *Re-rank* (`rerank.ts`): MMR-style genre diversity + exploration slots for genres outside the
+     user's top 3 (more diversity for new users = taste calibration).
+- **Learning loop**: every served card's feature vector is logged (`recs_impressions`); swipes
+  (`recs_interactions`) join to them for leak-free training rows. Retrains off-thread
+  (`train-worker.ts`, separate esbuild entry) every 50 new rows / ≥10 min, with a **time-based
+  validation split**; a new model is only adopted if it beats the prior's AUC. Status: `GET /api/recs/status`.
+- **Endpoints**: `POST /api/recs/deck {userId, filters, exclude, limit}`, `/feedback {userId, key,
+  action, impressionId}`, `/undo`, `/sync` (one-time import of on-device history), `GET /status`.
+  Keys are `"movie:<id>"` / `"tv:<id>"`. Actions: like, skip, seen, seen_up, seen_meh, seen_down.
+- **Filters** (`filters.ts`) are applied exactly: genres (movie ids mapped to TV ids), US streaming
+  providers (flatrate), era (`new` = last 2 years, `classic` = before 2000), min rating, max runtime,
+  in theaters. Every served card is re-checked against them.
+- **DB**: tables in `lib/db/src/schema/recs.ts` — run `pnpm --filter @workspace/db run push`.
+  Without `DATABASE_URL` the recommender uses an in-memory store (data lost on restart).
+- **Checks**: `pnpm --filter @workspace/api-server run recsys:simulate` (synthetic users; prints
+  like-rate vs baselines and validation AUCs) and `run recsys:e2e` (routes + fake TMDB, asserts filters).
+- **Identity**: accounts are still device-local, so `userId` is the username (or a per-device
+  guest id). Anyone can send swipes for any username — fine for recs, not for anything private.
 
 ### Critical Express 5 Note
 

@@ -1,35 +1,27 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity,
   ActivityIndicator, Platform, Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { SwipeCard } from '@/components/SwipeCard';
+import { Image } from 'expo-image';
+import { SwipeCard, type SwipeCardHandle, type SwipeDirection } from '@/components/SwipeCard';
 import { FilterSheet } from '@/components/FilterSheet';
 import { MediaDetailModal } from '@/components/MediaDetailModal';
 import { TutorialOverlay } from '@/components/TutorialOverlay';
 import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
-import { fetchBulkContent, fetchTrailerKey, fetchWatchProviders, fetchSimilarIds, fetchKeywords, fetchCredits, MediaItem } from '@/services/tmdb';
-import { buildTaste, calibrationSort, sortByRecommendation } from '@/services/recommendations';
+import { fetchTrailerKey, MediaItem } from '@/services/tmdb';
+import {
+  fetchDeck, getRecsUserId, keyOf, sendFeedback, sendUndo, syncHistoryOnce, type SwipeAction,
+} from '@/services/recs';
 import Colors from '@/constants/colors';
 
-const GENRE_NAMES: Record<number, string> = {
-  28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
-  99: 'Documentary', 18: 'Drama', 10751: 'Family', 14: 'Fantasy', 36: 'History',
-  27: 'Horror', 10402: 'Music', 9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi',
-  10770: 'TV Movie', 53: 'Thriller', 10752: 'War', 37: 'Western',
-  10759: 'Action & Adventure', 10762: 'Kids', 10763: 'News', 10764: 'Reality',
-  10765: 'Sci-Fi & Fantasy', 10766: 'Soap', 10767: 'Talk', 10768: 'War & Politics',
-};
-
-function enrichGenres(items: MediaItem[]): MediaItem[] {
-  return items.map(item => ({
-    ...item,
-    genreNames: item.genres.map(id => GENRE_NAMES[id]).filter(Boolean),
-  }));
-}
+/** Fetch the next page once this many cards are left, so the deck never runs dry mid-swipe. */
+const REFILL_AT = 6;
+const FIRST_PAGE = 15;
+const NEXT_PAGE = 20;
 
 function RatingPrompt({
   item,
@@ -150,362 +142,165 @@ const promptStyles = StyleSheet.create({
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
   const {
-    filters, setFilters, swipedIds,
+    filters, setFilters,
     recordSwipe, markWatched, undoLastSwipe, rateWatched, watchedRatings,
     savedItems, skippedItems, watchedItems, cacheDeckItems,
   } = useAppContext();
-  const [canUndo, setCanUndo] = useState(false);
-  const lastSwipedItemRef = useRef<MediaItem | null>(null);
   const { user } = useAuth();
   const showTutorial = user !== null && !user.hasSeenTutorial;
 
-  const [allItems, setAllItems] = useState<MediaItem[]>([]);
+  const [deck, setDeck] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [exhausted, setExhausted] = useState(false);
+  const [fetchingMore, setFetchingMore] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
-  const [trailerKeys, setTrailerKeys] = useState<Record<number, string | null>>({});
-  const [providerMap, setProviderMap] = useState<Record<string, { streamingIds: number[]; watchLink: string | null }>>({});
-  const [providersFetching, setProvidersFetching] = useState(0);
-  const [keywordMap, setKeywordMap] = useState<Record<number, string[]>>({});
-  const [castMap, setCastMap] = useState<Record<number, number[]>>({});
+  const [trailerKeys, setTrailerKeys] = useState<Record<string, string | null>>({});
   const [pendingRatingItem, setPendingRatingItem] = useState<MediaItem | null>(null);
+  const [lastSwiped, setLastSwiped] = useState<MediaItem | null>(null);
 
-  const seenItemIds = useRef(new Set<string>());
-  const trailerFetching = useRef(new Set<number>());
-  const providerFetching = useRef(new Set<string>());
-  const providerQueue = useRef<MediaItem[]>([]);
-  const providerActiveCount = useRef(0);
-  const providerGeneration = useRef(0);
-  const runNextProvider = useRef<() => void>(() => {});
-  const abortRef = useRef<AbortController | null>(null);
+  const userIdRef = useRef<string | null>(null);
+  const deckRef = useRef<MediaItem[]>([]);
+  deckRef.current = deck;
+  const servedKeys = useRef(new Set<string>()); // shown this session; excluded from later pages
+  const pageInFlight = useRef(false);
+  const generation = useRef(0); // bumps on filter change so stale pages are dropped
+  const topCardRef = useRef<SwipeCardHandle>(null);
+  const trailerFetching = useRef(new Set<string>());
 
-  const collaborativeMap = useRef<Map<number, number[]>>(new Map());
-  const collaborativeFetching = useRef<Set<number>>(new Set());
-
-  const richQueue = useRef<MediaItem[]>([]);
-  const richActiveCount = useRef(0);
-  const richFetching = useRef(new Set<number>());
-  const runNextRich = useRef<() => void>(() => {});
-
-  const maxRuntimeRef = useRef<number | null>(null);
-
-  const loadContent = useCallback(async () => {
-    if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setLoading(true);
-    setLoadError(false);
-    setAllItems([]);
-    setProviderMap({});
-    seenItemIds.current.clear();
-    trailerFetching.current.clear();
-    providerFetching.current.clear();
-    providerQueue.current = [];
-    providerActiveCount.current = 0;
-    providerGeneration.current++;
-    setProvidersFetching(0);
-
-    const maxRuntime = maxRuntimeRef.current;
-    let gotFirst = false;
-
+  const loadPage = useCallback(async (reset: boolean) => {
+    if (!reset && pageInFlight.current) return;
+    const gen = reset ? ++generation.current : generation.current;
+    pageInFlight.current = true;
+    setFetchingMore(true);
+    if (reset) {
+      setLoading(true);
+      setLoadError(false);
+      setExhausted(false);
+      servedKeys.current = new Set();
+    }
     try {
-      await fetchBulkContent((batch) => {
-        if (controller.signal.aborted) return;
+      const userId = userIdRef.current ?? (userIdRef.current = await getRecsUserId(user?.username));
+      const exclude = reset ? [] : [...servedKeys.current];
+      const items = await fetchDeck(userId, filters, exclude, reset ? FIRST_PAGE : NEXT_PAGE);
+      if (gen !== generation.current) return;
 
-        const newItems: MediaItem[] = [];
-        const theaterMergeKeys = new Set<string>();
-        const streamingMergeMap = new Map<string, number[]>();
-
-        for (const item of batch) {
-          const key = `${item.type}_${item.id}`;
-          if (!seenItemIds.current.has(key)) {
-            seenItemIds.current.add(key);
-            newItems.push(item);
-          } else if (item.inTheaters) {
-            theaterMergeKeys.add(key);
-          } else if (item.streamingIds.length > 0) {
-            streamingMergeMap.set(key, item.streamingIds);
-          }
-        }
-
-        for (let i = 0; i < newItems.length; i++) {
-          const key = `${newItems[i].type}_${newItems[i].id}`;
-          if (streamingMergeMap.has(key)) {
-            const incoming = streamingMergeMap.get(key)!;
-            const merged = [...new Set([...newItems[i].streamingIds, ...incoming])];
-            newItems[i] = { ...newItems[i], streamingIds: merged };
-            streamingMergeMap.delete(key);
-          }
-        }
-
-        const hasMerges = theaterMergeKeys.size > 0 || streamingMergeMap.size > 0;
-        if (hasMerges) {
-          setAllItems(prev => prev.map(m => {
-            const key = `${m.type}_${m.id}`;
-            let updated = m;
-            if (theaterMergeKeys.has(key)) updated = { ...updated, inTheaters: true };
-            if (streamingMergeMap.has(key)) {
-              const incoming = streamingMergeMap.get(key)!;
-              const merged = [...new Set([...updated.streamingIds, ...incoming])];
-              updated = { ...updated, streamingIds: merged };
-            }
-            return updated;
-          }));
-        }
-
-        if (newItems.length === 0) return;
-        const enriched = enrichGenres(newItems);
-
-        setAllItems(prev => [...prev, ...enriched]);
-        cacheDeckItems(enriched);
-
-        if (!gotFirst) {
-          gotFirst = true;
-          setLoading(false);
-        }
-      }, controller.signal, maxRuntime != null ? { maxRuntime } : undefined);
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        console.error('Load error:', e);
-        setLoadError(true);
-        setLoading(false);
+      const fresh = items.filter(i => !servedKeys.current.has(keyOf(i)));
+      fresh.forEach(i => servedKeys.current.add(keyOf(i)));
+      setDeck(prev => (reset ? fresh : [...prev, ...fresh]));
+      if (fresh.length === 0) setExhausted(true);
+      cacheDeckItems(fresh);
+      // Warm the image cache so the next cards appear instantly.
+      Image.prefetch(fresh.slice(0, 8).map(i => i.posterUrl).filter(Boolean)).catch(() => {});
+    } catch (e) {
+      if (gen !== generation.current) return;
+      console.warn('Deck load failed:', e);
+      if (reset || deckRef.current.length === 0) setLoadError(true);
+    } finally {
+      if (gen === generation.current) {
+        pageInFlight.current = false;
+        setFetchingMore(false);
+        if (reset) setLoading(false);
       }
     }
-  }, []);
+  }, [filters, user?.username, cacheDeckItems]);
 
+  // (Re)load whenever the filters or the signed-in user change.
+  const filtersKey = JSON.stringify(filters);
   useEffect(() => {
-    maxRuntimeRef.current = filters.maxRuntime;
-    loadContent();
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const userId = await getRecsUserId(user?.username);
+      userIdRef.current = userId;
+      // Older accounts kept swipes only on the device; hand them to the recommender once.
+      await syncHistoryOnce(userId, savedItems, skippedItems, watchedItems, watchedRatings);
+      if (!cancelled) loadPage(true);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey, user?.username]);
 
+  // Keep the deck topped up ahead of the user.
   useEffect(() => {
-    if (maxRuntimeRef.current === filters.maxRuntime) return;
-    maxRuntimeRef.current = filters.maxRuntime;
-    loadContent();
-  }, [filters.maxRuntime]);
+    if (loading || exhausted || loadError) return;
+    if (deck.length <= REFILL_AT) loadPage(false);
+  }, [deck.length, loading, exhausted, loadError, loadPage]);
 
-  const deck = useMemo(() => {
-    let pool = allItems.filter(m => !swipedIds.has(m.id));
-    if (filters.contentType === 'movie') pool = pool.filter(m => m.type === 'movie');
-    if (filters.contentType === 'tv') pool = pool.filter(m => m.type === 'tv');
-    if (filters.inTheaters) pool = pool.filter(m => m.inTheaters);
-    if (filters.genres.length > 0) pool = pool.filter(m => m.genres.some(g => filters.genres.includes(g)));
-    if (filters.minRating > 0) pool = pool.filter(m => m.rating >= filters.minRating);
-    if (filters.maxRuntime != null) {
-      pool = pool.filter(m => {
-        if (m.type !== 'movie') return true;
-        if (!m.runtimeMinutes) return true;
-        return m.runtimeMinutes <= filters.maxRuntime!;
-      });
-    }
-    if (filters.streaming.length > 0) {
-      pool = pool.filter(m => {
-        const key = `${m.type}_${m.id}`;
-        const providers = providerMap[key];
-        const ids = providers ? providers.streamingIds : m.streamingIds;
-        return ids.some(id => filters.streaming.includes(id));
-      });
-    }
-
-    const totalSwipes = savedItems.length + skippedItems.length + watchedItems.length;
-
-    if (totalSwipes < 10) {
-      // Phase 1 (0–9 swipes): calibration — genre-diverse deck, no personalisation
-      return calibrationSort(pool);
-    }
-
-    if (totalSwipes < 30) {
-      // Phase 2 (10–29 swipes): warm-up — genre/era weighting only, no franchise tunnelling
-      const taste = buildTaste(savedItems, skippedItems, watchedItems, collaborativeMap.current, keywordMap, castMap, watchedRatings);
-      return sortByRecommendation(pool, taste, keywordMap, castMap, {
-        swipeCount: totalSwipes,
-        warmupOnly: true,
-      });
-    }
-
-    // Phase 3 (30+ swipes): full personalisation with diversity guardrails
-    const taste = buildTaste(savedItems, skippedItems, watchedItems, collaborativeMap.current, keywordMap, castMap, watchedRatings);
-    return sortByRecommendation(pool, taste, keywordMap, castMap, { swipeCount: totalSwipes });
-  }, [allItems, swipedIds, filters, providerMap, savedItems, skippedItems, watchedItems, keywordMap, castMap, watchedRatings]);
-
-  const enrichedDeck = useMemo(() => {
-    return deck.map(item => {
-      const key = `${item.type}_${item.id}`;
-      const providers = providerMap[key];
-      if (!providers) return item;
-      return {
-        ...item,
-        streamingIds: providers.streamingIds,
-        watchLink: providers.watchLink,
-      };
-    });
-  }, [deck, providerMap]);
-
+  // Trailers for the next few cards.
+  const topKeys = deck.slice(0, 3).map(keyOf).join(',');
   useEffect(() => {
-    if (deck.length === 0) return;
-    const toFetch = deck.slice(0, 5).filter(
-      item => !trailerFetching.current.has(item.id) && !(item.id in trailerKeys)
-    );
-    for (const item of toFetch) {
-      trailerFetching.current.add(item.id);
+    for (const item of deck.slice(0, 3)) {
+      const k = keyOf(item);
+      if (trailerFetching.current.has(k)) continue;
+      trailerFetching.current.add(k);
       fetchTrailerKey(item.type, item.id).then(key => {
-        setTrailerKeys(prev => ({ ...prev, [item.id]: key }));
+        setTrailerKeys(prev => ({ ...prev, [k]: key }));
       });
     }
-  }, [deck.length > 0 ? deck[0]?.id : 0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topKeys]);
 
-  const candidatePool = useMemo(() => {
-    return allItems.filter(m => !swipedIds.has(m.id));
-  }, [allItems, swipedIds]);
-
-  runNextProvider.current = () => {
-    const CONCURRENT = 6;
-    while (providerActiveCount.current < CONCURRENT && providerQueue.current.length > 0) {
-      const item = providerQueue.current.shift()!;
-      const key = `${item.type}_${item.id}`;
-      const gen = providerGeneration.current;
-      providerActiveCount.current++;
-      setProvidersFetching(n => n + 1);
-      fetchWatchProviders(item.type, item.id).then(data => {
-        providerActiveCount.current--;
-        setProvidersFetching(n => Math.max(0, n - 1));
-        if (gen === providerGeneration.current) {
-          setProviderMap(prev => ({ ...prev, [key]: data }));
-        }
-        runNextProvider.current();
-      });
-    }
+  const sendSwipe = (item: MediaItem, action: SwipeAction) => {
+    if (userIdRef.current) sendFeedback(userIdRef.current, item, action);
+    setLastSwiped(item);
   };
 
-  runNextRich.current = () => {
-    const CONCURRENT = 4;
-    while (richActiveCount.current < CONCURRENT && richQueue.current.length > 0) {
-      const item = richQueue.current.shift()!;
-      richActiveCount.current++;
-      Promise.all([
-        fetchKeywords(item.type, item.id),
-        fetchCredits(item.type, item.id),
-      ]).then(([keywords, castIds]) => {
-        richActiveCount.current--;
-        setKeywordMap(prev => ({ ...prev, [item.id]: keywords }));
-        setCastMap(prev => ({ ...prev, [item.id]: castIds }));
-        runNextRich.current();
-      }).catch(() => {
-        richActiveCount.current--;
-        richFetching.current.delete(item.id);
-        runNextRich.current();
-      });
-    }
-  };
-
-  useEffect(() => {
-    const MAX_LIKED = 50;
-    const toFetch = savedItems.slice(-MAX_LIKED).filter(item => !richFetching.current.has(item.id));
-    for (const item of toFetch) {
-      richFetching.current.add(item.id);
-      richQueue.current.push(item);
-    }
-    if (toFetch.length > 0) runNextRich.current();
-  }, [savedItems]);
-
-  useEffect(() => {
-    if (candidatePool.length === 0) return;
-    const PROVIDER_PREFETCH = filters.streaming.length > 0 ? 200 : 80;
-    const toEnqueue = candidatePool.slice(0, PROVIDER_PREFETCH).filter(item => {
-      const key = `${item.type}_${item.id}`;
-      return !providerFetching.current.has(key);
-    });
-    for (const item of toEnqueue) {
-      const key = `${item.type}_${item.id}`;
-      providerFetching.current.add(key);
-      providerQueue.current.push(item);
-    }
-    runNextProvider.current();
-  }, [candidatePool.length > 0 ? candidatePool[0]?.id : 0, candidatePool.length, filters.streaming.length > 0]);
-
-  useEffect(() => {
-    if (Object.keys(providerMap).length === 0) return;
-    setAllItems(prev => prev.map(item => {
-      const key = `${item.type}_${item.id}`;
-      const providers = providerMap[key];
-      if (!providers) return item;
-      if (item.streamingIds === providers.streamingIds && item.watchLink === providers.watchLink) return item;
-      return { ...item, streamingIds: providers.streamingIds, watchLink: providers.watchLink };
-    }));
-  }, [providerMap]);
-
-  useEffect(() => {
-    if (filters.streaming.length === 0) return;
-    if (enrichedDeck.length > 0) return;
-    if (providersFetching > 0) return;
-    if (candidatePool.length === 0) return;
-    const currentWindow = providerFetching.current.size;
-    const EXPAND_BY = 20;
-    const toEnqueue = candidatePool.slice(currentWindow, currentWindow + EXPAND_BY).filter(item => {
-      const key = `${item.type}_${item.id}`;
-      return !providerFetching.current.has(key);
-    });
-    if (toEnqueue.length === 0) return;
-    for (const item of toEnqueue) {
-      const key = `${item.type}_${item.id}`;
-      providerFetching.current.add(key);
-      providerQueue.current.push(item);
-    }
-    runNextProvider.current();
-  }, [filters.streaming.length, enrichedDeck.length, providersFetching, candidatePool.length]);
-
-  const handleSwipe = useCallback((direction: 'left' | 'right' | 'up') => {
-    if (enrichedDeck.length === 0) return;
-    let item = enrichedDeck[0];
-    if (!item.streamingIds || item.streamingIds.length === 0) {
-      const key = `${item.type}_${item.id}`;
-      const providers = providerMap[key];
-      if (providers) {
-        item = { ...item, streamingIds: providers.streamingIds, watchLink: providers.watchLink };
-      }
-    }
-    lastSwipedItemRef.current = item;
-    setCanUndo(true);
+  /** Called once the card has finished flying off screen. */
+  const handleSwipe = useCallback((direction: SwipeDirection) => {
+    const item = deckRef.current[0];
+    if (!item) return;
+    const k = keyOf(item);
+    setDeck(prev => (prev[0] && keyOf(prev[0]) === k ? prev.slice(1) : prev.filter(i => keyOf(i) !== k)));
     if (direction === 'up') {
       setPendingRatingItem(item);
-    } else {
-      recordSwipe(item, direction === 'right');
-      if (direction === 'right' && !collaborativeFetching.current.has(item.id)) {
-        collaborativeFetching.current.add(item.id);
-        const sourceGenres = item.genres;
-        fetchSimilarIds(item.type, item.id).then(ids => {
-          // Cap at top 2 per source — beyond that, same-source items get no boost
-          ids.slice(0, 2).forEach(id => {
-            if (!collaborativeMap.current.has(id)) {
-              collaborativeMap.current.set(id, sourceGenres);
-            }
-          });
-        });
-      }
+      return;
     }
-  }, [enrichedDeck, providerMap, recordSwipe, markWatched]);
+    const liked = direction === 'right';
+    recordSwipe(item, liked);
+    sendSwipe(item, liked ? 'like' : 'skip');
+  }, [recordSwipe]);
+
+  /** Buttons animate the card exactly like a swipe does. */
+  const swipeTop = (direction: SwipeDirection) => {
+    if (deckRef.current.length === 0) return;
+    if (topCardRef.current) topCardRef.current.swipe(direction);
+    else handleSwipe(direction);
+  };
 
   const handleUndo = useCallback(() => {
+    const item = lastSwiped;
+    if (!item) return;
     undoLastSwipe();
-    setCanUndo(false);
-    lastSwipedItemRef.current = null;
-  }, [undoLastSwipe]);
+    if (userIdRef.current) sendUndo(userIdRef.current, item);
+    setDeck(prev => [item, ...prev.filter(i => keyOf(i) !== keyOf(item))]);
+    setLastSwiped(null);
+  }, [lastSwiped, undoLastSwipe]);
 
   const hasActiveFilters =
     filters.genres.length > 0 ||
     filters.minRating > 0 ||
     filters.contentType !== 'all' ||
+    filters.era !== 'all' ||
     filters.streaming.length > 0 ||
     filters.inTheaters ||
     filters.maxRuntime !== null;
 
   const paddingTop = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
   const currentItem = deck[0] ?? null;
+
+  const emptyTitle = hasActiveFilters ? 'No more matches' : "You've seen it all!";
+  const emptyDesc = filters.streaming.length > 0
+    ? 'Nothing else on those services matches. Try another service or loosen your filters.'
+    : filters.era === 'new'
+    ? 'No more recent releases match. Try "Any" release year or loosen other filters.'
+    : filters.era === 'classic'
+    ? 'No more oldies match. Try "Any" release year or loosen other filters.'
+    : filters.inTheaters
+    ? 'No more currently-playing movies matched. Try clearing In Theaters.'
+    : hasActiveFilters
+    ? 'Try loosening your filters.'
+    : 'Check back later for new picks.';
 
   return (
     <View style={[styles.container, { paddingTop }]}>
@@ -523,61 +318,54 @@ export default function DiscoverScreen() {
         {loading ? (
           <View style={styles.emptyState}>
             <ActivityIndicator size="large" color={Colors.accent} />
-            <Text style={styles.loadingText}>Fetching movies & shows…</Text>
+            <Text style={styles.loadingText}>Finding picks for you…</Text>
           </View>
-        ) : loadError ? (
+        ) : loadError && deck.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="wifi-outline" size={56} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>Connection failed</Text>
             <Text style={styles.emptyDesc}>Check your connection and retry.</Text>
-            <TouchableOpacity style={styles.refreshButton} onPress={loadContent}>
+            <TouchableOpacity style={styles.refreshButton} onPress={() => loadPage(true)}>
               <Text style={styles.refreshButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
-        ) : enrichedDeck.length === 0 ? (
+        ) : deck.length === 0 ? (
           <View style={styles.emptyState}>
-            {filters.streaming.length > 0 && providersFetching > 0 ? (
-              <ActivityIndicator size="large" color={Colors.accent} />
+            {fetchingMore && !exhausted ? (
+              <>
+                <ActivityIndicator size="large" color={Colors.accent} />
+                <Text style={styles.loadingText}>Finding more…</Text>
+              </>
             ) : (
-              <Ionicons name="film-outline" size={56} color={Colors.textMuted} />
+              <>
+                <Ionicons name="film-outline" size={56} color={Colors.textMuted} />
+                <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+                <Text style={styles.emptyDesc}>{emptyDesc}</Text>
+                <View style={styles.emptyActions}>
+                  {hasActiveFilters && (
+                    <TouchableOpacity style={styles.secondaryButton} onPress={() => setShowFilters(true)}>
+                      <Text style={styles.secondaryButtonText}>Filters</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={styles.refreshButton} onPress={() => loadPage(true)}>
+                    <Text style={styles.refreshButtonText}>Refresh</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
             )}
-            <Text style={styles.emptyTitle}>
-              {filters.streaming.length > 0 && providersFetching > 0
-                ? 'Checking platforms…'
-                : filters.streaming.length > 0
-                ? 'No matches found'
-                : filters.inTheaters
-                ? 'No films in theaters'
-                : filters.maxRuntime
-                ? `No short films found`
-                : "You've seen it all!"}
-            </Text>
-            <Text style={styles.emptyDesc}>
-              {filters.streaming.length > 0 && providersFetching > 0
-                ? 'Verifying which titles are available on selected platforms.'
-                : filters.streaming.length > 0
-                ? 'No titles found on those platforms. Try different services or clear filters.'
-                : filters.inTheaters
-                ? 'No currently-playing movies matched. Try clearing the In Theaters filter.'
-                : filters.maxRuntime
-                ? `No movies found under ${filters.maxRuntime < 120 ? '1.5' : filters.maxRuntime === 120 ? '2' : '2.5'} hours. Try a longer runtime or clear the filter.`
-                : 'Try changing your filters or refresh.'}
-            </Text>
-            <TouchableOpacity style={styles.refreshButton} onPress={loadContent}>
-              <Text style={styles.refreshButtonText}>Refresh</Text>
-            </TouchableOpacity>
           </View>
         ) : (
-          enrichedDeck.slice(0, 3).reverse().map((item, idx, arr) => {
+          deck.slice(0, 3).reverse().map((item, idx, arr) => {
             const stackIdx = arr.length - 1 - idx;
-            const isTop = stackIdx === 0;
+            const k = keyOf(item);
 
-            if (isTop) {
+            if (stackIdx === 0) {
               return (
                 <SwipeCard
-                  key={item.type + '_' + item.id}
+                  key={k}
+                  ref={topCardRef}
                   item={item}
-                  trailerKey={trailerKeys[item.id]}
+                  trailerKey={trailerKeys[k]}
                   isTop
                   onSwipeLeft={() => handleSwipe('left')}
                   onSwipeRight={() => handleSwipe('right')}
@@ -587,22 +375,26 @@ export default function DiscoverScreen() {
               );
             }
 
+            // The real next poster sits underneath, so it's already there as the top card leaves.
             return (
               <View
-                key={item.type + '_' + item.id}
+                key={k}
+                pointerEvents="none"
                 style={[
                   styles.backgroundCard,
                   {
                     transform: [
-                      { translateY: stackIdx * 14 },
-                      { scale: 1 - stackIdx * 0.05 },
+                      { translateY: stackIdx * 10 },
+                      { scale: 1 - stackIdx * 0.04 },
                     ],
                     zIndex: -stackIdx,
-                    opacity: 1 - stackIdx * 0.2,
                   },
                 ]}
               >
-                <View style={styles.cardInnerBack} />
+                <View style={styles.cardInnerBack}>
+                  <Image source={item.posterUrl} style={StyleSheet.absoluteFill} contentFit="cover" />
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(10,10,15,${0.2 + stackIdx * 0.2})` }]} />
+                </View>
               </View>
             );
           })
@@ -614,16 +406,16 @@ export default function DiscoverScreen() {
       }]}>
         <TouchableOpacity
           style={[styles.actionBtn, styles.skipBtn]}
-          onPress={() => handleSwipe('left')}
-          disabled={enrichedDeck.length === 0}
+          onPress={() => swipeTop('left')}
+          disabled={deck.length === 0}
         >
           <Ionicons name="close" size={30} color={Colors.skip} />
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.actionBtn, styles.watchedBtn]}
-          onPress={() => handleSwipe('up')}
-          disabled={enrichedDeck.length === 0}
+          onPress={() => swipeTop('up')}
+          disabled={deck.length === 0}
         >
           <Ionicons name="checkmark-done" size={24} color="#7B68EE" />
           <Text style={styles.watchedBtnLabel}>Seen</Text>
@@ -631,18 +423,18 @@ export default function DiscoverScreen() {
 
         <TouchableOpacity
           style={[styles.actionBtn, styles.likeBtn]}
-          onPress={() => handleSwipe('right')}
-          disabled={enrichedDeck.length === 0}
+          onPress={() => swipeTop('right')}
+          disabled={deck.length === 0}
         >
           <Ionicons name="heart" size={30} color={Colors.like} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.actionBtn, styles.undoBtn, !canUndo && styles.undoBtnDisabled]}
+          style={[styles.actionBtn, styles.undoBtn, !lastSwiped && styles.undoBtnDisabled]}
           onPress={handleUndo}
-          disabled={!canUndo}
+          disabled={!lastSwiped}
         >
-          <Ionicons name="arrow-undo" size={22} color={canUndo ? Colors.accent : Colors.textMuted} />
+          <Ionicons name="arrow-undo" size={22} color={lastSwiped ? Colors.accent : Colors.textMuted} />
         </TouchableOpacity>
       </View>
 
@@ -657,9 +449,9 @@ export default function DiscoverScreen() {
         visible={!!selectedItem}
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
-        onLike={() => { if (currentItem) handleSwipe('right'); setSelectedItem(null); }}
-        onSkip={() => { if (currentItem) handleSwipe('left'); setSelectedItem(null); }}
-        onWatched={() => { if (currentItem) handleSwipe('up'); setSelectedItem(null); }}
+        onLike={() => { setSelectedItem(null); if (currentItem) swipeTop('right'); }}
+        onSkip={() => { setSelectedItem(null); if (currentItem) swipeTop('left'); }}
+        onWatched={() => { setSelectedItem(null); if (currentItem) swipeTop('up'); }}
       />
 
       {pendingRatingItem && (
@@ -668,10 +460,12 @@ export default function DiscoverScreen() {
           onRate={(rating) => {
             markWatched(pendingRatingItem);
             rateWatched(pendingRatingItem.id, rating);
+            sendSwipe(pendingRatingItem, `seen_${rating}`);
             setPendingRatingItem(null);
           }}
           onSkip={() => {
             markWatched(pendingRatingItem);
+            sendSwipe(pendingRatingItem, 'seen');
             setPendingRatingItem(null);
           }}
         />
@@ -719,6 +513,7 @@ const styles = StyleSheet.create({
   },
   cardInnerBack: {
     flex: 1,
+    overflow: 'hidden',
     borderRadius: 20,
     backgroundColor: Colors.bgCard,
     borderColor: Colors.border,
@@ -738,6 +533,13 @@ const styles = StyleSheet.create({
     borderRadius: 24, marginTop: 8,
   },
   refreshButtonText: { color: '#000', fontWeight: '800', fontSize: 15 },
+  emptyActions: { flexDirection: 'row', gap: 12 },
+  secondaryButton: {
+    borderColor: Colors.accent, borderWidth: 1.5,
+    paddingHorizontal: 24, paddingVertical: 12,
+    borderRadius: 24, marginTop: 8,
+  },
+  secondaryButtonText: { color: Colors.accent, fontWeight: '800', fontSize: 15 },
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'center',
