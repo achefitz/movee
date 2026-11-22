@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "MovieMuse"
+version = "1.0.0"
+id = "artifacts/cineswipe"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 18253
+
+[services.development]
+run = "pnpm --filter @workspace/cineswipe run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/cineswipe", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/cineswipe", "run", "serve" ]
+
+[services.env]
+PORT = "18253"
+BASE_PATH = "/"
