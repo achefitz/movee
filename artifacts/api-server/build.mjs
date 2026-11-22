@@ -15,7 +15,11 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    entryPoints: [
+      { in: path.resolve(artifactDir, "src/index.ts"), out: "index" },
+      // Off-thread ranker training, loaded with `new Worker` by src/recsys/service.ts
+      { in: path.resolve(artifactDir, "src/recsys/train-worker.ts"), out: "train-worker" },
+    ],
     platform: "node",
     bundle: true,
     format: "esm",

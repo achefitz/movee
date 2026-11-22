@@ -1,37 +1,10 @@
 import { Router } from 'express';
+import { tmdbFetch } from '../lib/tmdb';
+
 const router = Router();
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 
-const TOKEN = process.env.TMDB_READ_ACCESS_TOKEN || '';
-const API_KEY = process.env.TMDB_API_KEY || '';
-
-async function tmdbFetch(path: string, queryStr: string): Promise<{ ok: boolean; status: number; data: any }> {
-  let fullUrl = TMDB_BASE + path;
-
-  if (TOKEN) {
-    if (queryStr) fullUrl += '?' + queryStr;
-    const res = await fetch(fullUrl, {
-      headers: {
-        'Authorization': `Bearer ${TOKEN}`,
-        'Accept': 'application/json',
-      },
-    });
-    const data = res.ok ? await res.json() : await res.text();
-    return { ok: res.ok, status: res.status, data };
-  } else if (API_KEY) {
-    const q = new URLSearchParams(queryStr || '');
-    q.set('api_key', API_KEY);
-    fullUrl += '?' + q.toString();
-    const res = await fetch(fullUrl, {
-      headers: { 'Accept': 'application/json' },
-    });
-    const data = res.ok ? await res.json() : await res.text();
-    return { ok: res.ok, status: res.status, data };
-  }
-
-  throw new Error('No TMDB credentials configured');
-}
-
+// NOTE: router.use() + req.path, not a `/{*path}` wildcard — Express 5 joins
+// wildcard segments with commas (see replit.md).
 router.use(async (req: any, res: any) => {
   const tmdbPath = req.path;
   const query = new URLSearchParams(req.query as any);
