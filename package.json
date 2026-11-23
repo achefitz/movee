@@ -1,17 +1,17 @@
 {
-  "name": "muse",
+  "name": "movee",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
   "engines": { "node": ">=22" },
   "scripts": {
     "dev": "node ./dev.mjs",
-    "dev:api": "pnpm --filter @muse/api run dev",
-    "dev:mobile": "pnpm --filter @muse/mobile run dev",
+    "dev:api": "pnpm --filter @movee/api run dev",
+    "dev:mobile": "pnpm --filter @movee/mobile run dev",
     "db:up": "docker compose up -d db",
-    "db:push": "pnpm --filter @muse/db run push",
+    "db:push": "pnpm --filter @movee/db run push",
     "typecheck": "pnpm -r run typecheck",
-    "test": "pnpm --filter @muse/api run recsys:e2e"
+    "test": "pnpm --filter @movee/api run recsys:e2e"
   },
   "devDependencies": {
     "typescript": "~5.9.2"

@@ -2,12 +2,12 @@ services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_USER: muse
-      POSTGRES_PASSWORD: muse
-      POSTGRES_DB: muse
+      POSTGRES_USER: movee
+      POSTGRES_PASSWORD: movee
+      POSTGRES_DB: movee
     ports:
       - "5432:5432"
     volumes:
-      - muse-pg:/var/lib/postgresql/data
+      - movee-pg:/var/lib/postgresql/data
 volumes:
-  muse-pg:
+  movee-pg:

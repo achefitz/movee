@@ -27,5 +27,5 @@ app.listen(port, (err) => {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
   }
-  logger.info({ port }, "Muse API listening");
+  logger.info({ port }, "Movee API listening");
 });

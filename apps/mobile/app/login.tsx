@@ -46,7 +46,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.logoSection}>
-          <Text style={styles.logo}>MUSE</Text>
+          <Text style={styles.logo}>MOVEE</Text>
           <Text style={styles.tagline}>Swipe your way through cinema</Text>
         </View>
 

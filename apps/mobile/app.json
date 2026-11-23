@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Muse",
-    "slug": "cineswipe",
+    "name": "Movee",
+    "slug": "movee",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "cineswipe",
+    "scheme": "movee",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {

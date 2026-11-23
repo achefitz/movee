@@ -33,7 +33,7 @@ const SETTINGS_ITEMS = [
   { key: 'notifications', icon: 'notifications-outline' as const, label: 'Push Notifications', value: undefined },
   { key: 'region', icon: 'globe-outline' as const, label: 'Region', value: 'US' },
   { key: 'privacy', icon: 'shield-checkmark-outline' as const, label: 'Privacy', value: 'Public' },
-  { key: 'about', icon: 'information-circle-outline' as const, label: 'About Muse', value: 'v1.0' },
+  { key: 'about', icon: 'information-circle-outline' as const, label: 'About Movee', value: 'v1.0' },
 ];
 
 function useViewerType(topGenreNames: string[], moviePct: number, tvPct: number, totalLikes: number) {
@@ -159,7 +159,7 @@ export default function ProfileScreen() {
         </View>
 
         <Text style={styles.username}>{displayName}</Text>
-        <Text style={styles.memberSince}>Muse member</Text>
+        <Text style={styles.memberSince}>Movee member</Text>
       </View>
 
       <View style={styles.statsGrid}>

@@ -1,14 +1,14 @@
-# Muse
+# Movee
 
 Tinder-style movie & TV discovery app. pnpm workspace, TypeScript throughout.
 Setup and commands for humans are in `README.md`.
 
 ## Layout
 
-- `apps/mobile` (`@muse/mobile`): Expo SDK 54 / React Native 0.81, expo-router. 4 tabs.
-- `apps/api` (`@muse/api`): Express 5. `src/index.ts` loads the repo-root `.env`, default port 8080.
-- `packages/db` (`@muse/db`): Drizzle schema (`src/schema/recs.ts`) + `pg` pool. Also re-exports the
-  drizzle query helpers (`and`, `eq`, `sql`, …): import them from `@muse/db`, not `drizzle-orm`,
+- `apps/mobile` (`@movee/mobile`): Expo SDK 54 / React Native 0.81, expo-router. 4 tabs.
+- `apps/api` (`@movee/api`): Express 5. `src/index.ts` loads the repo-root `.env`, default port 8080.
+- `packages/db` (`@movee/db`): Drizzle schema (`src/schema/recs.ts`) + `pg` pool. Also re-exports the
+  drizzle query helpers (`and`, `eq`, `sql`, …): import them from `@movee/db`, not `drizzle-orm`,
   so there's a single drizzle copy.
 
 ## Commands
@@ -16,7 +16,7 @@ Setup and commands for humans are in `README.md`.
 - `pnpm dev`: API + Expo together (`dev.mjs`). `pnpm dev:api` / `pnpm dev:mobile` separately.
 - `pnpm typecheck`: all packages. Must pass before committing.
 - `pnpm test`: `apps/api/scripts/recsys-e2e.ts`; routes + recommender against a fake TMDB, in-memory store.
-- `pnpm --filter @muse/api run recsys:simulate`: offline simulation with synthetic users.
+- `pnpm --filter @movee/api run recsys:simulate`: offline simulation with synthetic users.
 - `pnpm db:push`: apply schema changes (needs `DATABASE_URL`). Without `DATABASE_URL` the API uses
   an in-memory store.
 - Mobile deps must match Expo SDK 54: add native packages with `pnpm exec expo install <pkg>` in

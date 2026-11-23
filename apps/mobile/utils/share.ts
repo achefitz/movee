@@ -3,7 +3,7 @@ import { MediaItem } from '../services/tmdb';
 
 export async function shareItem(item: MediaItem): Promise<void> {
   const url = `https://www.themoviedb.org/${item.type}/${item.id}`;
-  const message = `Check out ${item.title} (${item.year}) — find it on Muse!\n${url}`;
+  const message = `Check out ${item.title} (${item.year}) — find it on Movee!\n${url}`;
 
   if (Platform.OS === 'web') {
     if (typeof navigator !== 'undefined' && typeof (navigator as any).share === 'function') {

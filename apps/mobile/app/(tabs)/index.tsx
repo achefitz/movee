@@ -305,7 +305,7 @@ export default function DiscoverScreen() {
   return (
     <View style={[styles.container, { paddingTop }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>MUSE</Text>
+        <Text style={styles.headerTitle}>MOVEE</Text>
         <TouchableOpacity style={styles.filterButton} onPress={() => setShowFilters(true)}>
           <Ionicons name="options" size={24} color={Colors.accent} />
           {hasActiveFilters && (

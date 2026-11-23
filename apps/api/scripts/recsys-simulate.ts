@@ -1,7 +1,7 @@
 /**
  * Offline simulation of the recommender against synthetic users with hidden tastes.
  *
- *   pnpm --filter @muse/api run recsys:simulate
+ *   pnpm --filter @movee/api run recsys:simulate
  *
  * Each round, every user is served a 10-card deck and "swipes" according to a
  * hidden preference function. Swipes feed the cross-user stats and the logged

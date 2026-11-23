@@ -29,13 +29,13 @@ export interface RecsStore {
 
 // ------------------------------------------------------------------ Postgres
 
-type Db = typeof import('@muse/db');
+type Db = typeof import('@movee/db');
 
 export async function createPgStore(): Promise<RecsStore> {
   const {
     db, recsInteractions: I, recsImpressions: P, recsMediaItems: M, recsModels: R,
     and, desc, eq, inArray, lt, sql,
-  } = (await import('@muse/db')) as Db;
+  } = (await import('@movee/db')) as Db;
   const CHUNK = 500;
 
   const toInteraction = (r: { userId: string; itemKey: string; action: string; createdAt: Date }): Interaction => ({

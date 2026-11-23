@@ -1,10 +1,10 @@
-# Muse
+# Movee
 
 Swipe right on movies and shows you like, left on ones you don't. A server-side
 recommender learns from every swipe (yours and everyone else's) and keeps the
 deck filtered by streamer, genre, and new releases vs. oldies.
 
-![Muse screens](docs/screens.png)
+![Movee screens](docs/screens.png)
 
 ## Run it
 
@@ -56,7 +56,7 @@ pnpm test    # API routes + recommender against a fake TMDB, no network or DB ne
 ```
 
 ```bash
-pnpm --filter @muse/api run recsys:simulate    # synthetic users: like-rate vs baselines
+pnpm --filter @movee/api run recsys:simulate    # synthetic users: like-rate vs baselines
 ```
 
 ## How recommendations work

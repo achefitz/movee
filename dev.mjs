@@ -3,8 +3,8 @@
 import { spawn } from 'node:child_process';
 
 const procs = [
-  ['api', ['--filter', '@muse/api', 'run', 'dev']],
-  ['mobile', ['--filter', '@muse/mobile', 'run', 'dev']],
+  ['api', ['--filter', '@movee/api', 'run', 'dev']],
+  ['mobile', ['--filter', '@movee/mobile', 'run', 'dev']],
 ].map(([name, args]) => {
   const p = spawn('pnpm', args, { stdio: 'inherit', env: process.env });
   p.on('exit', code => {
