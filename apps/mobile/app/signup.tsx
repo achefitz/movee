@@ -7,7 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuth } from '@/context/AuthContext';
+import { MIN_PASSWORD, useAuth } from '@/context/AuthContext';
 import Colors from '@/constants/colors';
 
 export default function SignupScreen() {
@@ -38,8 +38,8 @@ export default function SignupScreen() {
       setError('Username can only contain letters, numbers, and underscores.');
       return;
     }
-    if (trimmedPassword.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (trimmedPassword.length < MIN_PASSWORD) {
+      setError(`Password must be at least ${MIN_PASSWORD} characters.`);
       return;
     }
     if (trimmedPassword !== confirmPassword.trim()) {
@@ -97,7 +97,7 @@ export default function SignupScreen() {
               <Ionicons name="lock-closed" size={18} color={Colors.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, styles.inputFlex]}
-                placeholder="At least 6 characters"
+                placeholder={`At least ${MIN_PASSWORD} characters`}
                 placeholderTextColor={Colors.textMuted}
                 value={password}
                 onChangeText={setPassword}

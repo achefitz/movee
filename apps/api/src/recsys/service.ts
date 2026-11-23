@@ -57,6 +57,35 @@ export type DeckItem = {
   reason?: string;
 };
 
+/** Catalog item in the app's MediaItem shape. */
+export function toMediaItem(it: CatalogItem): Omit<DeckItem, 'impressionId' | 'reason'> {
+  return {
+    id: it.id,
+    tmdbId: it.id,
+    key: it.key,
+    title: it.title,
+    type: it.type,
+    posterUrl: it.posterPath ? IMG + it.posterPath : '',
+    backdropUrl: it.backdropPath ? BACKDROP + it.backdropPath : '',
+    overview: it.overview,
+    rating: it.voteAverage,
+    voteCount: it.voteCount,
+    genres: it.genres,
+    genreNames: it.genres.map(g => GENRE_NAMES[g]).filter(Boolean),
+    year: String(yearOf(it) ?? ''),
+    streamingIds: it.providers ?? [],
+    inTheaters: !!it.inTheaters,
+    watchLink: it.watchLink ?? null,
+    runtimeMinutes: it.runtime ?? undefined,
+  };
+}
+
+export type ActivityEvent = {
+  item: ReturnType<typeof toMediaItem>;
+  action: 'liked' | 'watched';
+  timestamp: number;
+};
+
 export class RecsService {
   readonly catalog: Catalog;
   private stats: GlobalStats = emptyStats();
@@ -166,27 +195,29 @@ export class RecsService {
     else if (s.cand.sources.toprated && s.cand.sources.toprated.rank < 15 && it.voteAverage >= 8 && it.voteCount >= 1000) reason = 'Critically acclaimed';
     else if (s.cand.sources.popular && s.cand.sources.popular.rank < 15) reason = 'Trending now';
 
-    return {
-      id: it.id,
-      tmdbId: it.id,
-      key: it.key,
-      title: it.title,
-      type: it.type,
-      posterUrl: it.posterPath ? IMG + it.posterPath : '',
-      backdropUrl: it.backdropPath ? BACKDROP + it.backdropPath : '',
-      overview: it.overview,
-      rating: it.voteAverage,
-      voteCount: it.voteCount,
-      genres: it.genres,
-      genreNames: it.genres.map(g => GENRE_NAMES[g]).filter(Boolean),
-      year: String(yearOf(it) ?? ''),
-      streamingIds: it.providers ?? [],
-      inTheaters: !!it.inTheaters,
-      watchLink: it.watchLink ?? null,
-      runtimeMinutes: it.runtime ?? undefined,
-      impressionId: randomUUID(),
-      reason,
-    };
+    return { ...toMediaItem(it), impressionId: randomUUID(), reason };
+  }
+
+  /** A user's recent likes and watches (newest first), for friends' activity feeds. */
+  async recentActivity(userId: string, limit: number): Promise<ActivityEvent[]> {
+    const hist = (await this.store.getUserInteractions(userId))
+      .filter(i => i.action === 'like' || i.action.startsWith('seen'))
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, limit);
+    const items = await this.catalog.getItems(hist.map(h => h.itemKey));
+    return hist.flatMap(h => {
+      const it = items.get(h.itemKey);
+      return it ? [{ item: toMediaItem(it), action: h.action === 'like' ? 'liked' as const : 'watched' as const, timestamp: h.ts }] : [];
+    });
+  }
+
+  /** Genre id → number of liked titles in that genre (the Friends tab's watch-party input). */
+  async likedGenreScores(userId: string): Promise<Record<number, number>> {
+    const liked = (await this.store.getUserInteractions(userId)).filter(i => i.action === 'like');
+    const items = await this.catalog.getItems(liked.map(l => l.itemKey));
+    const scores: Record<number, number> = {};
+    for (const it of items.values()) for (const g of it.genres) scores[g] = (scores[g] ?? 0) + 1;
+    return scores;
   }
 
   async feedback(userId: string, key: string, action: Action, impressionId: string | null) {

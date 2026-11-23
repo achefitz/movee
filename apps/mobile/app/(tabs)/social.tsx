@@ -6,65 +6,42 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ApiError, apiFetch } from '@/services/api';
 import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { MediaItem } from '@/services/tmdb';
-
-const ACCOUNTS_KEY = 'cs:accounts';
-const FRIENDS_KEY = 'cs:friends';
 
 type Friend = {
   username: string;
   addedAt: number;
 };
 
+type FriendEvent = { item: MediaItem; action: 'liked' | 'watched'; timestamp: number; friendUsername: string };
+
 type WpPhase = 'loading' | 'swipe' | 'results';
 
-async function loadAccounts(): Promise<string[]> {
+// Friends live on the server: you can see likes/watches of people you've added.
+async function loadFriends(): Promise<Friend[]> {
   try {
-    const raw = await AsyncStorage.getItem(ACCOUNTS_KEY);
-    const accounts: Array<{ username: string }> = raw ? JSON.parse(raw) : [];
-    return accounts.map(a => a.username);
+    return (await apiFetch<{ friends: Friend[] }>('/api/friends')).friends;
   } catch {
     return [];
   }
-}
-
-async function loadFriends(currentUser: string): Promise<Friend[]> {
-  try {
-    const raw = await AsyncStorage.getItem(FRIENDS_KEY);
-    const all: Record<string, Friend[]> = raw ? JSON.parse(raw) : {};
-    return all[currentUser] ?? [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveFriends(currentUser: string, friends: Friend[]): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(FRIENDS_KEY);
-    const all: Record<string, Friend[]> = raw ? JSON.parse(raw) : {};
-    all[currentUser] = friends;
-    await AsyncStorage.setItem(FRIENDS_KEY, JSON.stringify(all));
-  } catch {}
 }
 
 async function loadFriendGenreScores(friendUsername: string): Promise<Record<number, number>> {
   try {
-    const raw = await AsyncStorage.getItem(`cs:genreScores:${friendUsername}`);
-    return raw ? JSON.parse(raw) : {};
+    return (await apiFetch<{ genreScores: Record<number, number> }>(
+      `/api/friends/${encodeURIComponent(friendUsername)}/taste`)).genreScores;
   } catch {
     return {};
   }
 }
 
-async function loadFriendPublicActivity(friendUsername: string): Promise<Array<{ item: MediaItem; action: 'liked' | 'watched'; timestamp: number; friendUsername: string }>> {
+async function loadFriendsActivity(): Promise<FriendEvent[]> {
   try {
-    const raw = await AsyncStorage.getItem(`cs:publicActivity:${friendUsername}`);
-    const events: Array<{ item: MediaItem; action: 'liked' | 'watched'; timestamp: number }> = raw ? JSON.parse(raw) : [];
-    return events.map(e => ({ ...e, friendUsername }));
+    return (await apiFetch<{ events: FriendEvent[] }>('/api/friends/activity?limit=20')).events;
   } catch {
     return [];
   }
@@ -149,15 +126,14 @@ export default function SocialScreen() {
 
   useEffect(() => {
     if (!currentUser) return;
-    loadFriends(currentUser).then(async f => {
+    let cancelled = false;
+    Promise.all([loadFriends(), loadFriendsActivity()]).then(([f, events]) => {
+      if (cancelled) return;
       setFriends(f);
+      setFriendActivity(events);
       setLoadingFriends(false);
-      const allFriendActivity = (
-        await Promise.all(f.map(fr => loadFriendPublicActivity(fr.username)))
-      ).flat();
-      allFriendActivity.sort((a, b) => b.timestamp - a.timestamp);
-      setFriendActivity(allFriendActivity.slice(0, 20));
     });
+    return () => { cancelled = true; };
   }, [currentUser]);
 
   const handleAddFriend = useCallback(async () => {
@@ -177,33 +153,25 @@ export default function SocialScreen() {
       setAddError('You already added this friend.');
       return;
     }
-    const accounts = await loadAccounts();
-    const found = accounts.find(a => a.toLowerCase() === username.toLowerCase());
-    if (!found) {
-      setAddError('No account found with that username.');
-      return;
+    try {
+      const { friend } = await apiFetch<{ friend: Friend }>('/api/friends', { body: { username } });
+      setFriends(prev => [...prev, friend]);
+      setFriendActivity(await loadFriendsActivity());
+      setInputUsername('');
+      setAddSuccess(`${friend.username} added!`);
+      setTimeout(() => setAddSuccess(''), 2500);
+    } catch (e) {
+      setAddError(e instanceof ApiError ? e.message : "Couldn't reach the server. Try again.");
     }
-    const newFriend: Friend = { username: found, addedAt: Date.now() };
-    const updated = [...friends, newFriend];
-    setFriends(updated);
-    await saveFriends(currentUser, updated);
-    const newFriendActivity = await loadFriendPublicActivity(found);
-    setFriendActivity(prev => {
-      const merged = [...prev, ...newFriendActivity];
-      merged.sort((a, b) => b.timestamp - a.timestamp);
-      return merged.slice(0, 20);
-    });
-    setInputUsername('');
-    setAddSuccess(`${found} added!`);
-    setTimeout(() => setAddSuccess(''), 2500);
   }, [inputUsername, friends, currentUser]);
 
   const handleRemoveFriend = useCallback(async (username: string) => {
-    const updated = friends.filter(f => f.username !== username);
-    setFriends(updated);
-    await saveFriends(currentUser, updated);
+    setFriends(prev => prev.filter(f => f.username !== username));
     setFriendActivity(prev => prev.filter(a => a.friendUsername !== username));
-  }, [friends, currentUser]);
+    try {
+      await apiFetch(`/api/friends/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    } catch {}
+  }, []);
 
   const handleWatchParty = useCallback(async (friend: Friend) => {
     setWatchPartyFriend(friend);

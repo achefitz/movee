@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
-import { getViewerTypeApiBase } from '@/services/tmdb';
+import { apiFetch } from '@/services/api';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -55,17 +55,14 @@ function useViewerType(topGenreNames: string[], moviePct: number, tvPct: number,
 
     const controller = new AbortController();
 
-    fetch(getViewerTypeApiBase(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    apiFetch<{ label?: string }>('/api/viewer-type', {
+      body: {
         topGenres: topGenreNames,
         mediaTypeSplit: { moviePct, tvPct },
         totalLikes,
-      }),
+      },
       signal: controller.signal,
     })
-      .then(r => r.json())
       .then(data => {
         if (data.label) setViewerType(data.label);
         else setViewerType(null);

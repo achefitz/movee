@@ -6,12 +6,12 @@
  */
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import express from 'express';
 import { mulberry32 } from '../src/recsys/gbdt';
 import { CLASSIC_BEFORE, newReleaseCutoff } from '../src/recsys/filters';
 
 delete process.env.DATABASE_URL;
 process.env.TMDB_API_KEY = 'fake';
+process.env.SIGNUP_LIMIT_PER_HOUR = '1000'; // the test signs up ~30 users from one IP
 
 // ------------------------------------------------------------------ fake TMDB
 const rng = mulberry32(3);
@@ -85,16 +85,37 @@ globalThis.fetch = (async (input: any, init?: any) => {
 }) as typeof fetch;
 
 // ------------------------------------------------------------------ server
-const { default: recsRouter } = await import('../src/routes/recs');
-const app = express();
-app.use(express.json({ limit: '1mb' }));
-app.use('/api/recs', recsRouter);
+// The real app (auth + recs + friends), in-memory stores.
+const { default: app } = await import('../src/app');
 const server = app.listen(0);
-const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/recs`;
-const post = async (path: string, body: unknown) => {
-  const r = await realFetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  return { status: r.status, body: await r.json() as any };
+const root = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+const base = `${root}/recs`;
+
+type Res = { status: number; body: any };
+async function call(method: string, url: string, body?: unknown, token?: string): Promise<Res> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const r = await realFetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+// Test users are created on first use; `userId` in a body picks whose session token is sent.
+const tokens = new Map<string, string>();
+async function tokenFor(name: string): Promise<string> {
+  let t = tokens.get(name);
+  if (!t) {
+    const r = await call('POST', `${root}/auth/signup`, { username: name, password: 'correct horse battery' });
+    assert.equal(r.status, 201, `signup ${name}: ${JSON.stringify(r.body)}`);
+    t = r.body.token as string;
+    tokens.set(name, t);
+  }
+  return t;
+}
+const post = async (path: string, body: { userId: string } & Record<string, unknown>) => {
+  const { userId, ...rest } = body;
+  return call('POST', base + path, rest, await tokenFor(userId));
 };
+const getStatus = async () => (await call('GET', `${base}/status`, undefined, await tokenFor('alice'))).body;
 const byKey = new Map(fakes.map(f => [`${f.type}:${f.id}`, f]));
 let passed = 0;
 const ok = (msg: string) => { passed++; console.log(`  ✓ ${msg}`); };
@@ -120,7 +141,7 @@ try {
     ['oldie comedies on Prime', { era: 'classic', genres: [35], streaming: [9] }, f => f.date < CLASSIC_BEFORE && f.genres.includes(35) && f.providers.includes(9)],
   ];
   for (const [name, filt, pred] of checks) {
-    const r = await post('/deck', { userId: 'filter-tester', filters: filt, limit: 20 });
+    const r = await post('/deck', { userId: 'filter_tester', filters: filt, limit: 20 });
     assert.equal(r.status, 200, name);
     const items = r.body.items as any[];
     assert.ok(items.length > 0, `${name}: got no items`);
@@ -159,8 +180,9 @@ try {
 
   // 6. Validation
   assert.equal((await post('/feedback', { userId: 'alice', key: 'person:5', action: 'like' })).status, 400);
-  assert.equal((await post('/deck', { userId: 'bad id!' })).status, 400);
-  ok('bad input rejected with 400');
+  assert.equal((await call('POST', `${base}/deck`, { limit: 5 })).status, 401);
+  assert.equal((await call('POST', `${base}/deck`, { limit: 5 }, 'not-a-real-session-token-xxxxxxxx')).status, 401);
+  ok('bad input rejected with 400; no/invalid session rejected with 401');
 
   // 7. Sync of on-device history
   const s = await post('/sync', { userId: 'bob', entries: [{ key: 'movie:1', action: 'like' }, { key: 'tv:3', action: 'skip' }] });
@@ -183,7 +205,7 @@ try {
   // Training is checked at most every 15s on feedback, so keep swiping lightly while we wait.
   for (let i = 0; i < 60; i++) {
     if (i % 5 === 0) await post('/feedback', { userId: 'sim0', key: d1[1].key, action: 'like' });
-    const st = await (await realFetch(base + '/status')).json() as any;
+    const st = await getStatus();
     if (st.lastReport) {
       const a = st.lastReport.auc;
       console.log(`    trained on ${st.lastReport.nTrain}+${st.lastReport.nVal} rows: AUC prior ${a.prior.toFixed(3)} / ensemble ${a.ensemble.toFixed(3)}, adopted=${st.lastReport.adopted}, model=${JSON.stringify(st.model)}`);
@@ -191,9 +213,67 @@ try {
     }
     await new Promise(r => setTimeout(r, 1000));
   }
-  const st = await (await realFetch(base + '/status')).json() as any;
+  const st = await getStatus();
   assert.ok(st.lastReport, 'ranker never trained');
   ok('ranker retrains from logged impressions');
+
+  // 9. Accounts
+  const A = `${root}/auth`;
+  assert.equal((await call('POST', `${A}/signup`, { username: 'Alice', password: 'whatever123' })).status, 409);
+  ok('usernames are unique, case-insensitively');
+  assert.equal((await call('POST', `${A}/signup`, { username: 'shorty', password: 'short' })).status, 400);
+  assert.equal((await call('POST', `${A}/signup`, { username: 'bad name!', password: 'longenough1' })).status, 400);
+  ok('weak password / bad username rejected');
+  const wrong = await call('POST', `${A}/login`, { username: 'alice', password: 'nope-nope-nope' });
+  const ghost = await call('POST', `${A}/login`, { username: 'nobody_here', password: 'nope-nope-nope' });
+  assert.equal(wrong.status, 401); assert.equal(ghost.status, 401);
+  assert.equal(wrong.body.error, ghost.body.error);
+  ok('wrong password and unknown user give the same 401');
+  const li = await call('POST', `${A}/login`, { username: 'ALICE', password: 'correct horse battery' });
+  assert.equal(li.status, 200);
+  assert.equal(li.body.user.username, '@alice');
+  assert.ok(!('passwordHash' in li.body.user));
+  const me = await call('GET', `${A}/me`, undefined, li.body.token);
+  assert.equal(me.body.user.id, li.body.user.id);
+  ok('login is case-insensitive, returns a session, never the hash');
+  const patched = await call('PATCH', `${A}/me`, { hasSeenTutorial: true }, li.body.token);
+  assert.equal(patched.body.user.hasSeenTutorial, true);
+  ok('tutorial flag saved on the account');
+  assert.equal((await call('POST', `${A}/logout`, undefined, li.body.token)).status, 200);
+  assert.equal((await call('GET', `${A}/me`, undefined, li.body.token)).status, 401);
+  assert.equal((await call('GET', `${A}/me`, undefined, await tokenFor('alice'))).status, 200);
+  ok('logout ends only that session');
+  assert.equal((await call('GET', `${root}/tmdb/movie/550`)).status, 401);
+  ok('TMDB proxy requires login');
+  let limited = 0;
+  for (let i = 0; i < 10; i++) {
+    const r = await call('POST', `${A}/login`, { username: 'bob', password: `guess-${i}-xxxx` });
+    if (r.status === 429) limited++;
+  }
+  assert.ok(limited > 0, 'no rate limiting on repeated failures');
+  ok(`password guessing is rate-limited (${limited}/10 attempts refused)`);
+
+  // 10. Friends
+  const F = `${root}/friends`;
+  const aliceT = await tokenFor('alice');
+  assert.equal((await call('GET', `${F}/sim1/taste`, undefined, aliceT)).status, 404);
+  ok("can't read someone's taste before adding them");
+  assert.equal((await call('POST', F, { username: 'no_such_user' }, aliceT)).status, 404);
+  assert.equal((await call('POST', F, { username: '@alice' }, aliceT)).status, 400);
+  assert.equal((await call('POST', F, { username: 'SIM1' }, aliceT)).status, 201);
+  assert.equal((await call('POST', F, { username: 'sim1' }, aliceT)).status, 409);
+  const fl = await call('GET', F, undefined, aliceT);
+  assert.deepEqual(fl.body.friends.map((f: any) => f.username), ['@sim1']);
+  ok('add friend: unknown → 404, self → 400, duplicate → 409');
+  const act = await call('GET', `${F}/activity`, undefined, aliceT);
+  assert.ok(act.body.events.length > 0, 'no friend activity');
+  assert.ok(act.body.events.every((e: any) => e.friendUsername === '@sim1' && e.item.title && e.timestamp));
+  const friendTaste = await call('GET', `${F}/sim1/taste`, undefined, aliceT);
+  assert.ok(Object.keys(friendTaste.body.genreScores).length > 0);
+  ok(`friend activity (${act.body.events.length} events) and taste come from their swipes`);
+  await call('DELETE', `${F}/sim1`, undefined, aliceT);
+  assert.equal((await call('GET', F, undefined, aliceT)).body.friends.length, 0);
+  ok('remove friend');
 
   console.log(`\n${passed} checks passed; ${tmdbCalls} fake TMDB calls`);
 } finally {

@@ -1,32 +1,54 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ApiError, apiFetch, getToken, onUnauthorized, setToken } from '../services/api';
+import { clearPendingFeedback } from '../services/recs';
 
 export type User = {
+  id: string;
   username: string;
   hasSeenTutorial: boolean;
 };
+
+type AuthResult = { success: boolean; error?: string };
 
 export type AuthContextType = {
   user: User | null;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signup: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (username: string, password: string) => Promise<AuthResult>;
+  signup: (username: string, password: string) => Promise<AuthResult>;
   logout: () => Promise<void>;
   markTutorialSeen: () => Promise<void>;
 };
 
+export const MIN_PASSWORD = 8;
+const USERNAME_REGEX = /^@[a-zA-Z0-9_]{1,30}$/;
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const ACCOUNTS_KEY = 'cs:accounts';
-const SESSION_KEY = 'cs:session';
+// Last known account, so the app opens instantly (and offline) while /me revalidates.
+const USER_KEY = 'movee.user';
 
-type StoredAccount = {
-  username: string;
-  passwordHash: string;
-  hasSeenTutorial: boolean;
+async function cacheUser(u: User | null) {
+  try {
+    if (u) await AsyncStorage.setItem(USER_KEY, JSON.stringify(u));
+    else await AsyncStorage.removeItem(USER_KEY);
+  } catch {}
+}
+
+const normalise = (username: string) => {
+  const t = username.trim();
+  return t.startsWith('@') ? t : `@${t}`;
 };
 
-function simpleHash(str: string): string {
+const messageOf = (e: unknown) =>
+  e instanceof ApiError ? e.message : "Can't reach the server. Check your connection and try again.";
+
+// ---------------------------------------------------------------- legacy on-device accounts
+// Before server accounts, usernames + a weak hash lived in AsyncStorage. On a failed login we
+// check there once and, if the password matches, create the server account with it.
+const LEGACY_ACCOUNTS_KEY = 'cs:accounts';
+
+function legacyHash(str: string): string {
   let hash = 5381;
   for (let i = 0; i < str.length; i++) {
     hash = (hash << 5) + hash + str.charCodeAt(i);
@@ -35,118 +57,132 @@ function simpleHash(str: string): string {
   return hash.toString(16);
 }
 
-const USERNAME_REGEX = /^@[a-zA-Z0-9_]+$/;
-
-async function loadAccounts(): Promise<StoredAccount[]> {
+async function matchLegacyAccount(username: string, password: string): Promise<boolean> {
   try {
-    const raw = await AsyncStorage.getItem(ACCOUNTS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = await AsyncStorage.getItem(LEGACY_ACCOUNTS_KEY);
+    const accounts: Array<{ username: string; passwordHash: string }> = raw ? JSON.parse(raw) : [];
+    const acct = accounts.find(a => a.username.toLowerCase() === username.toLowerCase());
+    return !!acct && acct.passwordHash === legacyHash(password);
   } catch {
-    return [];
+    return false;
   }
 }
 
-async function saveAccounts(accounts: StoredAccount[]) {
+async function forgetLegacyAccount(username: string) {
   try {
-    await AsyncStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+    const raw = await AsyncStorage.getItem(LEGACY_ACCOUNTS_KEY);
+    const accounts: Array<{ username: string }> = raw ? JSON.parse(raw) : [];
+    const rest = accounts.filter(a => a.username.toLowerCase() !== username.toLowerCase());
+    if (rest.length) await AsyncStorage.setItem(LEGACY_ACCOUNTS_KEY, JSON.stringify(rest));
+    else await AsyncStorage.removeItem(LEGACY_ACCOUNTS_KEY);
   } catch {}
 }
 
-async function loadSession(): Promise<User | null> {
-  try {
-    const raw = await AsyncStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-async function saveSession(user: User | null) {
-  try {
-    if (user) {
-      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    } else {
-      await AsyncStorage.removeItem(SESSION_KEY);
-    }
-  } catch {}
-}
+// ---------------------------------------------------------------- provider
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const signOutLocally = useCallback(async () => {
+    await setToken(null);
+    await cacheUser(null);
+    await clearPendingFeedback();
+    setUser(null);
+  }, []);
+
+  // Any 401 from the API means the session is gone.
+  useEffect(() => onUnauthorized(() => { signOutLocally(); }), [signOutLocally]);
+
   useEffect(() => {
     (async () => {
-      const session = await loadSession();
-      setUser(session);
-      setIsLoading(false);
+      const token = await getToken();
+      if (!token) {
+        await cacheUser(null);
+        setIsLoading(false);
+        return;
+      }
+      let cached: User | null = null;
+      try {
+        const raw = await AsyncStorage.getItem(USER_KEY);
+        cached = raw ? JSON.parse(raw) : null;
+      } catch {}
+      if (cached) {
+        setUser(cached);
+        setIsLoading(false);
+      }
+      try {
+        const { user: fresh } = await apiFetch<{ user: User }>('/api/auth/me');
+        setUser(fresh);
+        await cacheUser(fresh);
+      } catch (e) {
+        // 401 already signed us out via onUnauthorized; other errors: stay on the cached account.
+        if (!cached && !(e instanceof ApiError && e.status === 401)) setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
     })();
   }, []);
 
-  const login = useCallback(async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    const normalizedUsername = username.startsWith('@') ? username : `@${username}`;
-    const accounts = await loadAccounts();
-    const account = accounts.find(a => a.username.toLowerCase() === normalizedUsername.toLowerCase());
-    if (!account) {
-      return { success: false, error: 'No account found with that username.' };
-    }
-    if (account.passwordHash !== simpleHash(password)) {
-      return { success: false, error: 'Incorrect password.' };
-    }
-    const sessionUser: User = {
-      username: account.username,
-      hasSeenTutorial: account.hasSeenTutorial ?? true,
-    };
-    await saveSession(sessionUser);
-    setUser(sessionUser);
-    return { success: true };
+  const startSession = useCallback(async (res: { token: string; user: User }) => {
+    await setToken(res.token);
+    await cacheUser(res.user);
+    setUser(res.user);
   }, []);
 
-  const signup = useCallback(async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    const normalizedUsername = username.startsWith('@') ? username : `@${username}`;
-    if (normalizedUsername.length < 2) {
-      return { success: false, error: 'Username must be at least 1 character after @.' };
+  const signup = useCallback(async (username: string, password: string): Promise<AuthResult> => {
+    const name = normalise(username);
+    if (!USERNAME_REGEX.test(name)) {
+      return { success: false, error: 'Username can only contain letters, numbers, and underscores (max 30).' };
     }
-    if (!USERNAME_REGEX.test(normalizedUsername)) {
-      return { success: false, error: 'Username can only contain letters, numbers, and underscores.' };
+    if (password.length < MIN_PASSWORD) {
+      return { success: false, error: `Password must be at least ${MIN_PASSWORD} characters.` };
     }
-    if (password.length < 6) {
-      return { success: false, error: 'Password must be at least 6 characters.' };
+    try {
+      await startSession(await apiFetch('/api/auth/signup', { body: { username: name, password }, auth: false }));
+      await forgetLegacyAccount(name);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: messageOf(e) };
     }
-    const accounts = await loadAccounts();
-    const exists = accounts.find(a => a.username.toLowerCase() === normalizedUsername.toLowerCase());
-    if (exists) {
-      return { success: false, error: 'That username is already taken.' };
+  }, [startSession]);
+
+  const login = useCallback(async (username: string, password: string): Promise<AuthResult> => {
+    const name = normalise(username);
+    try {
+      await startSession(await apiFetch('/api/auth/login', { body: { username: name, password }, auth: false }));
+      await forgetLegacyAccount(name);
+      return { success: true };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401 && await matchLegacyAccount(name, password)) {
+        if (password.length < MIN_PASSWORD) {
+          return {
+            success: false,
+            error: `Accounts now live on our server and need a password of at least ${MIN_PASSWORD} characters. Tap "Sign up" and create ${name} again with a longer password — your swipes on this phone carry over.`,
+          };
+        }
+        const moved = await signup(name, password);
+        if (moved.success) return moved;
+      }
+      return { success: false, error: messageOf(e) };
     }
-    const newAccount: StoredAccount = {
-      username: normalizedUsername,
-      passwordHash: simpleHash(password),
-      hasSeenTutorial: false,
-    };
-    await saveAccounts([...accounts, newAccount]);
-    const sessionUser: User = { username: normalizedUsername, hasSeenTutorial: false };
-    await saveSession(sessionUser);
-    setUser(sessionUser);
-    return { success: true };
-  }, []);
+  }, [startSession, signup]);
 
   const logout = useCallback(async () => {
-    await saveSession(null);
-    setUser(null);
-  }, []);
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    await signOutLocally();
+  }, [signOutLocally]);
 
   const markTutorialSeen = useCallback(async () => {
     if (!user) return;
     const updated = { ...user, hasSeenTutorial: true };
-    await saveSession(updated);
     setUser(updated);
-    const accounts = await loadAccounts();
-    const updatedAccounts = accounts.map(a =>
-      a.username.toLowerCase() === user.username.toLowerCase()
-        ? { ...a, hasSeenTutorial: true }
-        : a
-    );
-    await saveAccounts(updatedAccounts);
+    await cacheUser(updated);
+    try {
+      await apiFetch('/api/auth/me', { method: 'PATCH', body: { hasSeenTutorial: true } });
+    } catch {}
   }, [user]);
 
   return (

@@ -1,4 +1,4 @@
-import { API_URL } from '../constants/api';
+import { apiFetch } from './api';
 
 export type MediaItem = {
   id: number;
@@ -25,17 +25,9 @@ export type MediaItem = {
 };
 
 
-export function getApiBase(): string {
-  return API_URL + '/api/tmdb';
-}
-
+/** GET via the API's TMDB proxy (requires a signed-in session). */
 async function tmdbGet(path: string): Promise<any> {
-  const url = getApiBase() + path;
-  const res = await fetch(url, {
-    headers: { 'Cache-Control': 'no-cache' },
-  });
-  if (!res.ok) throw new Error(`TMDB ${res.status}: ${path}`);
-  return res.json();
+  return apiFetch('/api/tmdb' + path);
 }
 
 export async function fetchTrailerKey(type: 'movie' | 'tv', id: number): Promise<string | null> {
@@ -54,9 +46,6 @@ export async function fetchTrailerKey(type: 'movie' | 'tv', id: number): Promise
   }
 }
 
-export function getViewerTypeApiBase(): string {
-  return API_URL + '/api/viewer-type';
-}
 
 export type MediaDetails = {
   director: string;

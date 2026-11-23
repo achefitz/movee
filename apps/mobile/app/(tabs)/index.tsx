@@ -14,7 +14,7 @@ import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { fetchTrailerKey, MediaItem } from '@/services/tmdb';
 import {
-  fetchDeck, getRecsUserId, keyOf, sendFeedback, sendUndo, syncHistoryOnce, type SwipeAction,
+  fetchDeck, keyOf, sendFeedback, sendUndo, syncHistoryOnce, type SwipeAction,
 } from '@/services/recs';
 import Colors from '@/constants/colors';
 
@@ -160,7 +160,6 @@ export default function DiscoverScreen() {
   const [pendingRatingItem, setPendingRatingItem] = useState<MediaItem | null>(null);
   const [lastSwiped, setLastSwiped] = useState<MediaItem | null>(null);
 
-  const userIdRef = useRef<string | null>(null);
   const deckRef = useRef<MediaItem[]>([]);
   deckRef.current = deck;
   const servedKeys = useRef(new Set<string>()); // shown this session; excluded from later pages
@@ -181,9 +180,8 @@ export default function DiscoverScreen() {
       servedKeys.current = new Set();
     }
     try {
-      const userId = userIdRef.current ?? (userIdRef.current = await getRecsUserId(user?.username));
       const exclude = reset ? [] : [...servedKeys.current];
-      const items = await fetchDeck(userId, filters, exclude, reset ? FIRST_PAGE : NEXT_PAGE);
+      const items = await fetchDeck(filters, exclude, reset ? FIRST_PAGE : NEXT_PAGE);
       if (gen !== generation.current) return;
 
       const fresh = items.filter(i => !servedKeys.current.has(keyOf(i)));
@@ -204,22 +202,20 @@ export default function DiscoverScreen() {
         if (reset) setLoading(false);
       }
     }
-  }, [filters, user?.username, cacheDeckItems]);
+  }, [filters, cacheDeckItems]);
 
   // (Re)load whenever the filters or the signed-in user change.
   const filtersKey = JSON.stringify(filters);
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const userId = await getRecsUserId(user?.username);
-      userIdRef.current = userId;
-      // Older accounts kept swipes only on the device; hand them to the recommender once.
-      await syncHistoryOnce(userId, savedItems, skippedItems, watchedItems, watchedRatings);
+      // Swipes kept on this phone from before server accounts: hand them to the recommender once.
+      if (user) await syncHistoryOnce(user.id, savedItems, skippedItems, watchedItems, watchedRatings);
       if (!cancelled) loadPage(true);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersKey, user?.username]);
+  }, [filtersKey, user?.id]);
 
   // Keep the deck topped up ahead of the user.
   useEffect(() => {
@@ -242,7 +238,7 @@ export default function DiscoverScreen() {
   }, [topKeys]);
 
   const sendSwipe = (item: MediaItem, action: SwipeAction) => {
-    if (userIdRef.current) sendFeedback(userIdRef.current, item, action);
+    sendFeedback(item, action);
     setLastSwiped(item);
   };
 
@@ -272,7 +268,7 @@ export default function DiscoverScreen() {
     const item = lastSwiped;
     if (!item) return;
     undoLastSwipe();
-    if (userIdRef.current) sendUndo(userIdRef.current, item);
+    sendUndo(item);
     setDeck(prev => [item, ...prev.filter(i => keyOf(i) !== keyOf(item))]);
     setLastSwiped(null);
   }, [lastSwiped, undoLastSwipe]);

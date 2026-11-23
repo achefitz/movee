@@ -7,7 +7,7 @@ Setup and commands for humans are in `README.md`.
 
 - `apps/mobile` (`@movee/mobile`): Expo SDK 54 / React Native 0.81, expo-router. 4 tabs.
 - `apps/api` (`@movee/api`): Express 5. `src/index.ts` loads the repo-root `.env`, default port 8080.
-- `packages/db` (`@movee/db`): Drizzle schema (`src/schema/recs.ts`) + `pg` pool. Also re-exports the
+- `packages/db` (`@movee/db`): Drizzle schema (`src/schema/`: `auth.ts` users/sessions/friends, `recs.ts` recommender) + `pg` pool. Also re-exports the
   drizzle query helpers (`and`, `eq`, `sql`, …): import them from `@movee/db`, not `drizzle-orm`,
   so there's a single drizzle copy.
 
@@ -15,7 +15,8 @@ Setup and commands for humans are in `README.md`.
 
 - `pnpm dev`: API + Expo together (`dev.mjs`). `pnpm dev:api` / `pnpm dev:mobile` separately.
 - `pnpm typecheck`: all packages. Must pass before committing.
-- `pnpm test`: `apps/api/scripts/recsys-e2e.ts`; routes + recommender against a fake TMDB, in-memory store.
+- `pnpm test`: `apps/api/scripts/recsys-e2e.ts`; the whole API (accounts, friends, recommender) against a
+  fake TMDB with in-memory stores.
 - `pnpm --filter @movee/api run recsys:simulate`: offline simulation with synthetic users.
 - `pnpm db:push`: apply schema changes (needs `DATABASE_URL`). Without `DATABASE_URL` the API uses
   an in-memory store.
@@ -25,16 +26,30 @@ Setup and commands for humans are in `README.md`.
 ## Environment
 
 - `TMDB_READ_ACCESS_TOKEN` (or `TMDB_API_KEY`) in `.env`; required for real data.
-- `DATABASE_URL`: optional; Postgres for swipes, impressions, cached titles, trained models.
+- `DATABASE_URL`: Postgres for accounts, sessions, friends, swipes, cached titles, trained models.
+  Optional for trying things out; without it everything is in memory and lost on restart.
 - `ANTHROPIC_API_KEY`: optional; Profile tab's "viewer type" label via Claude Haiku
   (`apps/api/src/routes/viewer-type.ts`), rule-based label otherwise.
+- `TRUST_PROXY`: set behind a reverse proxy so rate limits see real client IPs. `SIGNUP_LIMIT_PER_HOUR`
+  (default 10 per IP).
 - `apps/mobile`: `EXPO_PUBLIC_API_URL` (default `http://localhost:8080`; use a LAN IP on a phone).
 
 ## Design
 
 - **Theme**: `#0A0A0F` bg, `#F5C518` gold accent, `#2ECC71` like, `#E74C3C` skip, `#7B68EE` watched.
-- **Accounts are device-local** (AsyncStorage), so the recommender's `userId` is the username or a
-  per-device guest id. Anyone can send swipes for any username: fine for recs, not for anything private.
+- **Accounts live on the server** (`apps/api/src/auth/`, `routes/auth.ts`). Passwords: scrypt
+  (`auth/crypto.ts`). Sessions: random bearer token; only its SHA-256 is stored (`sessions` table),
+  60-day sliding expiry. Login/signup are rate-limited per IP and per username (`auth/rateLimit.ts`,
+  in-memory, so per instance). Every route except `/api/healthz` and `/api/auth/{signup,login}`
+  requires `requireAuth` (`auth/middleware.ts`); handlers use `req.user.id`, never a user id from the
+  request body.
+- **App side**: `services/api.ts` holds the token (expo-secure-store on phones, localStorage on web)
+  and `apiFetch()` attaches it; any 401 signs the user out via `onUnauthorized`. Use `apiFetch` for
+  every API call. `context/AuthContext.tsx` moves old on-device accounts (`cs:accounts`) to the
+  server on their first login.
+- **Friends** (`routes/friends.ts`) are one-directional: adding someone lets you see their recent
+  likes/watches and genre taste, which come from their swipes on the server.
+- Local per-user data in AsyncStorage (saved items, filters…) is still keyed by username.
 
 ### Mobile key files
 

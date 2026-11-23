@@ -1,7 +1,8 @@
 # Movee
 
-Swipe right on movies and shows you like, left on ones you don't. A server-side
-recommender learns from every swipe (yours and everyone else's) and keeps the
+Swipe right on movies and shows you like, left on ones you don't. Sign in with an
+account stored on the server, add friends to see what they like, and let a server-side
+recommender learn from every swipe (yours and everyone else's) while keeping the
 deck filtered by streamer, genre, and new releases vs. oldies.
 
 ![Movee screens](docs/screens.png)
@@ -19,7 +20,7 @@ cp .env.example .env    # then paste your TMDB token into .env
 ```
 
 ```bash
-pnpm db:up && pnpm db:push    # optional: Postgres via Docker. Skip both to use an in-memory store.
+pnpm db:up && pnpm db:push    # Postgres via Docker. Skip to try it with an in-memory store (accounts vanish on restart).
 ```
 
 ```bash
@@ -52,7 +53,7 @@ pnpm typecheck
 ```
 
 ```bash
-pnpm test    # API routes + recommender against a fake TMDB, no network or DB needed
+pnpm test    # accounts, friends and recommender against a fake TMDB; no network or DB needed
 ```
 
 ```bash

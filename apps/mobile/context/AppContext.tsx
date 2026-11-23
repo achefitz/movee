@@ -81,7 +81,6 @@ async function save(key: string, value: any) {
 }
 
 const MAX_ACTIVITY_LOG = 50;
-const MAX_PUBLIC_ACTIVITY = 20;
 
 function userKey(username: string | undefined, suffix: string): string {
   return username ? `cs:${username}:${suffix}` : `cs:guest:${suffix}`;
@@ -160,20 +159,12 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
         if (prev.find(i => i.id === item.id)) return prev;
         const next = [...prev, item];
         save(userKey(username, 'savedItems'), next);
-        if (username) {
-          const scores: Record<number, number> = {};
-          next.forEach(i => i.genres.forEach(g => { scores[g] = (scores[g] || 0) + 1; }));
-          save(`cs:genreScores:${username}`, scores);
-        }
         return next;
       });
       setActivityLog(prev => {
         const event: ActivityEvent = { item, action: 'liked', timestamp: Date.now() };
         const next = [event, ...prev].slice(0, MAX_ACTIVITY_LOG);
         save(userKey(username, 'activityLog'), next);
-        if (username) {
-          save(`cs:publicActivity:${username}`, next.slice(0, MAX_PUBLIC_ACTIVITY));
-        }
         return next;
       });
     } else {
@@ -215,9 +206,6 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       const event: ActivityEvent = { item, action: 'watched', timestamp: Date.now() };
       const next = [event, ...prev].slice(0, MAX_ACTIVITY_LOG);
       save(userKey(username, 'activityLog'), next);
-      if (username) {
-        save(`cs:publicActivity:${username}`, next.slice(0, MAX_PUBLIC_ACTIVITY));
-      }
       return next;
     });
   }, [username]);
@@ -253,11 +241,6 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       setSavedItems(prev => {
         const next = prev.filter(i => i.id !== item.id);
         save(userKey(username, 'savedItems'), next);
-        if (username) {
-          const scores: Record<number, number> = {};
-          next.forEach(i => i.genres.forEach(g => { scores[g] = (scores[g] || 0) + 1; }));
-          save(`cs:genreScores:${username}`, scores);
-        }
         return next;
       });
       setActivityLog(prev => {
@@ -299,11 +282,6 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     setSavedItems(prev => {
       const next = prev.filter(i => i.id !== id);
       save(userKey(username, 'savedItems'), next);
-      if (username) {
-        const scores: Record<number, number> = {};
-        next.forEach(i => i.genres.forEach(g => { scores[g] = (scores[g] || 0) + 1; }));
-        save(`cs:genreScores:${username}`, scores);
-      }
       return next;
     });
     setLikedIds(prev => {
@@ -354,12 +332,6 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       userKey(username, 'activityLog'),
       userKey(username, 'watchedRatings'),
     ]);
-    if (username) {
-      await AsyncStorage.multiRemove([
-        `cs:genreScores:${username}`,
-        `cs:publicActivity:${username}`,
-      ]);
-    }
   }, [username]);
 
   const cacheDeckItems = useCallback((items: MediaItem[]) => {

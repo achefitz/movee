@@ -1,76 +1,50 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../constants/api';
 import type { Filters } from '../context/AppContext';
+import { ApiError, apiFetch, getToken } from './api';
 import type { MediaItem } from './tmdb';
 
 export type SwipeAction = 'like' | 'skip' | 'seen' | 'seen_up' | 'seen_meh' | 'seen_down';
 
-export function getRecsBase(): string {
-  return API_URL + '/api/recs';
-}
-
 export const keyOf = (item: Pick<MediaItem, 'type' | 'id'>) => `${item.type}:${item.id}`;
 
-/** Logged-in username, or a random per-device id for guests. */
-export async function getRecsUserId(username?: string): Promise<string> {
-  if (username) return username;
-  const k = 'cs:deviceId';
-  try {
-    const existing = await AsyncStorage.getItem(k);
-    if (existing) return existing;
-    const id = 'guest:' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    await AsyncStorage.setItem(k, id);
-    return id;
-  } catch {
-    return 'guest:anonymous';
-  }
-}
-
-async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(getRecsBase() + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok) throw new Error(`recs ${path} ${res.status}`);
-  return res.json();
-}
-
+/** The recommender acts on the signed-in account (from the session token); no user id is sent. */
 export async function fetchDeck(
-  userId: string,
   filters: Filters,
   exclude: string[],
   limit = 20,
   signal?: AbortSignal,
 ): Promise<MediaItem[]> {
-  const { items } = await post<{ items: MediaItem[] }>('/deck', {
-    userId,
-    filters: {
-      contentType: filters.contentType,
-      genres: filters.genres,
-      streaming: filters.streaming,
-      era: filters.era,
-      minRating: filters.minRating,
-      maxRuntime: filters.maxRuntime,
-      inTheaters: filters.inTheaters,
+  const { items } = await apiFetch<{ items: MediaItem[] }>('/api/recs/deck', {
+    body: {
+      filters: {
+        contentType: filters.contentType,
+        genres: filters.genres,
+        streaming: filters.streaming,
+        era: filters.era,
+        minRating: filters.minRating,
+        maxRuntime: filters.maxRuntime,
+        inTheaters: filters.inTheaters,
+      },
+      exclude: exclude.slice(-300),
+      limit,
     },
-    exclude: exclude.slice(-300),
-    limit,
-  }, signal);
+    signal,
+  });
   return items;
 }
 
 // ---------------------------------------------------------------- feedback queue
 // Swipes must not be lost on a flaky connection: queue, persist, retry.
+// The queue belongs to the signed-in account and is cleared on logout.
 
 type Pending =
-  | { kind: 'feedback'; userId: string; key: string; action: SwipeAction; impressionId?: string | null }
-  | { kind: 'undo'; userId: string; key: string };
+  | { kind: 'feedback'; key: string; action: SwipeAction; impressionId?: string | null }
+  | { kind: 'undo'; key: string };
 
-const QUEUE_KEY = 'cs:recsQueue';
+const QUEUE_KEY = 'movee.recsQueue';
 let queue: Pending[] = [];
 let flushing = false;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Every queue mutation chains on this one promise, so the persisted queue is
 // always restored first and swipes keep their order.
@@ -87,18 +61,25 @@ async function flush() {
   flushing = true;
   try {
     await ready;
+    if (!(await getToken())) return; // signed out: nothing to send to
     while (queue.length > 0) {
       const next = queue[0];
       try {
         if (next.kind === 'feedback') {
-          await post('/feedback', { userId: next.userId, key: next.key, action: next.action, impressionId: next.impressionId ?? null });
+          await apiFetch('/api/recs/feedback', { body: { key: next.key, action: next.action, impressionId: next.impressionId ?? null } });
         } else {
-          await post('/undo', { userId: next.userId, key: next.key });
+          await apiFetch('/api/recs/undo', { body: { key: next.key } });
         }
         queue.shift();
         persist();
-      } catch {
-        setTimeout(flush, 5000); // offline / server down — retry later
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 400) {
+          queue.shift(); // malformed entry; drop it rather than block the queue
+          persist();
+          continue;
+        }
+        if (e instanceof ApiError && e.status === 401) return; // logout clears the queue
+        retryTimer ??= setTimeout(() => { retryTimer = null; flush(); }, 5000); // offline / server down
         return;
       }
     }
@@ -115,26 +96,34 @@ function enqueue(p: Pending) {
   });
 }
 
-export function sendFeedback(userId: string, item: MediaItem, action: SwipeAction) {
-  enqueue({ kind: 'feedback', userId, key: keyOf(item), action, impressionId: item.impressionId ?? null });
+export function sendFeedback(item: MediaItem, action: SwipeAction) {
+  enqueue({ kind: 'feedback', key: keyOf(item), action, impressionId: item.impressionId ?? null });
 }
 
-export function sendUndo(userId: string, item: MediaItem) {
-  enqueue({ kind: 'undo', userId, key: keyOf(item) });
+export function sendUndo(item: MediaItem) {
+  enqueue({ kind: 'undo', key: keyOf(item) });
+}
+
+/** Called on logout so one account's queued swipes are never sent as another's. */
+export async function clearPendingFeedback(): Promise<void> {
+  await ready;
+  queue = [];
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  persist();
 }
 
 /**
- * One-time upload of swipes made before the recommender existed, so long-time
- * users don't start from scratch.
+ * One-time upload of swipes kept on this phone from before server accounts,
+ * so long-time users don't start from scratch.
  */
 export async function syncHistoryOnce(
-  userId: string,
+  accountId: string,
   liked: MediaItem[],
   skipped: MediaItem[],
   watched: MediaItem[],
   ratings: Record<number, 'up' | 'meh' | 'down'>,
 ): Promise<void> {
-  const flag = `cs:recsSynced:${userId}`;
+  const flag = `movee.recsSynced:${accountId}`;
   try {
     if (await AsyncStorage.getItem(flag)) return;
     const entries = [
@@ -145,7 +134,7 @@ export async function syncHistoryOnce(
         action: (ratings[i.id] ? `seen_${ratings[i.id]}` : 'seen') as SwipeAction,
       })),
     ];
-    if (entries.length > 0) await post('/sync', { userId, entries: entries.slice(-3000) });
+    if (entries.length > 0) await apiFetch('/api/recs/sync', { body: { entries: entries.slice(-3000) } });
     await AsyncStorage.setItem(flag, '1');
   } catch {
     // Not fatal: the next launch will try again.
