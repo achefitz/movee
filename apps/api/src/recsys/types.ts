@@ -23,6 +23,8 @@ export type CatalogItem = {
   watchLink?: string | null;
   /** First and latest US theatrical (limited or wide) release dates; movies only. */
   usTheatrical?: { first: string | null; latest: string | null };
+  /** US age rating (G, PG-13, TV-14…); null = unrated; undefined = not fetched yet. */
+  certification?: string | null;
   /** IMDb id (tt…), null when TMDB has none. */
   imdbId?: string | null;
   /** Rotten Tomatoes Tomatometer (from Wikidata), cached; score null = none recorded. */
@@ -47,6 +49,8 @@ export type DeckFilters = {
   streaming: number[];
   era: Era;
   minRating: number;
+  /** US age ratings to allow (movie scale; TV maps onto it, see ratings/certification.ts). Empty = any. */
+  ageRatings: string[];
   maxRuntime: number | null;
   inTheaters: boolean;
 };
@@ -57,6 +61,7 @@ export const DEFAULT_FILTERS: DeckFilters = {
   streaming: [],
   era: 'all',
   minRating: 0,
+  ageRatings: [],
   maxRuntime: null,
   inTheaters: false,
 };

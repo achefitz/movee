@@ -1,5 +1,6 @@
 import { tmdbJson } from '../lib/tmdb';
 import { NEW_RELEASE_RUN_DAYS, usTheatricalDates } from './theaters';
+import { allowedCertifications, movieCertification, tvCertification } from '../ratings/certification';
 import { CLASSIC_BEFORE, filterKey, genresFor, isoDaysAgo, newReleaseCutoff, typesFor } from './filters';
 import type { RecsStore } from './store';
 import { itemKey, parseKey, type CatalogItem, type DeckFilters, type MediaType } from './types';
@@ -61,6 +62,7 @@ function merge(prev: CatalogItem | undefined, next: CatalogItem): CatalogItem {
     watchLink: next.watchLink ?? prev.watchLink,
     usTheatrical: next.usTheatrical ?? prev.usTheatrical,
     imdbId: next.imdbId !== undefined ? next.imdbId : prev.imdbId,
+    certification: next.certification !== undefined ? next.certification : prev.certification,
     rt: next.rt ?? prev.rt,
     detailsFetchedAt: next.detailsFetchedAt ?? prev.detailsFetchedAt,
   };
@@ -88,6 +90,10 @@ export function discoverQuery(
   else q[`${dateField}.lte`] = isoDaysAgo(0, now); // nothing unreleased
 
   if (f.minRating > 0) q['vote_average.gte'] = f.minRating;
+  if (f.ageRatings.length) {
+    q.certification_country = REGION;
+    q.certification = allowedCertifications(type, f.ageRatings).join('|');
+  }
   if (isMovie && f.maxRuntime != null) { q['with_runtime.lte'] = f.maxRuntime; q['with_runtime.gte'] = 1; }
 
   if (isMovie && f.inTheaters) {
@@ -244,7 +250,7 @@ export class Catalog {
     const stale = items.filter(it =>
       !it.detailsFetchedAt || now - it.detailsFetchedAt > DETAILS_TTL
       // Cached before these fields existed:
-      || it.imdbId === undefined || (it.type === 'movie' && !it.usTheatrical));
+      || it.imdbId === undefined || it.certification === undefined || (it.type === 'movie' && !it.usTheatrical));
     const fresh = await this.fetchDetails(stale.map(it => it.key));
     const out = new Map(items.map(it => [it.key, this.known.get(it.key) ?? it]));
     for (const it of fresh) out.set(it.key, it);
@@ -257,7 +263,7 @@ export class Catalog {
       if (!p) return null;
       try {
         const credits = p.type === 'movie' ? 'credits' : 'aggregate_credits';
-        const extra = p.type === 'movie' ? ',release_dates' : '';
+        const extra = p.type === 'movie' ? ',release_dates' : ',content_ratings';
         const d = await tmdbJson(`/${p.type}/${p.id}`, {
           language: 'en-US',
           append_to_response: `keywords,${credits},watch/providers,external_ids${extra}`,
@@ -280,6 +286,7 @@ export class Catalog {
           watchLink: us?.link ?? null,
           usTheatrical: p.type === 'movie' ? usTheatricalDates(d.release_dates) : undefined,
           imdbId: (p.type === 'movie' ? d.imdb_id : null) || d.external_ids?.imdb_id || null,
+          certification: p.type === 'movie' ? movieCertification(d.release_dates) : tvCertification(d.content_ratings),
           detailsFetchedAt: Date.now(),
         };
       } catch (err: any) {

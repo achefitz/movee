@@ -86,6 +86,9 @@ export function MediaDetailModal({ visible, item, onClose, onLike, onSkip, onWat
                 <Text style={styles.typeBadgeText}>{item.type === 'movie' ? 'MOVIE' : 'TV'}</Text>
               </View>
               {item.year ? <Text style={styles.year}>{item.year}</Text> : null}
+            {item.certification ? (
+              <View style={styles.certBadge}><Text style={styles.certText}>{item.certification}</Text></View>
+            ) : null}
             </View>
 
             <Text style={styles.title}>{item.title}</Text>
@@ -222,6 +225,15 @@ export function MediaDetailModal({ visible, item, onClose, onLike, onSkip, onWat
 }
 
 const styles = StyleSheet.create({
+  certBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 8,
+  },
+  certText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',

@@ -67,6 +67,7 @@ function RootLayoutNav() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="login" options={{ headerShown: false, animation: 'fade' }} />
             <Stack.Screen name="signup" options={{ headerShown: false, animation: 'slide_from_right' }} />
+            <Stack.Screen name="user/[username]" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
           </Stack>
         </AuthGate>

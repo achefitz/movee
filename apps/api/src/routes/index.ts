@@ -4,6 +4,7 @@ import authRouter from "./auth";
 import followsRouter from "./follows";
 import healthRouter from "./health";
 import onboardingRouter from "./onboarding";
+import usersRouter from "./users";
 import recsRouter from "./recs";
 import tmdbRouter from "./tmdb";
 import viewerTypeRouter from "./viewer-type";
@@ -19,5 +20,6 @@ router.use("/viewer-type", requireAuth, viewerTypeRouter);
 router.use("/recs", recsRouter);
 router.use("/follows", followsRouter);
 router.use("/onboarding", onboardingRouter);
+router.use("/users", usersRouter);
 
 export default router;

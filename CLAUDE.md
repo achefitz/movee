@@ -88,7 +88,14 @@ open items) is `docs/HANDOFF.md`.
 - Letterboxd: `constants/links.ts` (`letterboxd.com/tmdb/<id>`, movies only; Letterboxd has no TV).
   Shown on movie cards and in the details sheet. No Letterboxd rating: their API needs approval.
 - `components/FilterSheet.tsx`: content type, Release (Any / New = last 2 yrs / Oldies = pre-2000),
-  streamers, genres, rating, runtime, in theaters.
+  age rating, streamers, genres, rating, runtime, in theaters.
+- Age rating (`apps/api/src/ratings/certification.ts`): US MPA rating from TMDB `release_dates` (movies)
+  or `content_ratings` (TV). Picks are movie levels; TV maps G→TV-Y/TV-Y7/TV-G, PG→TV-PG, PG-13→TV-14,
+  R/NC-17→TV-MA. Unrated titles are excluded when the filter is on. Badge on cards and details.
+- Profiles: `app/user/[username].tsx` + `GET /api/users/:username` (likes/watches visible if public,
+  your own, or you're an approved follower). Usernames in the Social tab open it. Profile tab's
+  Movies / TV Shows / Watched tiles open a `TitleGrid` sheet.
+- On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync
   of on-device history.
 

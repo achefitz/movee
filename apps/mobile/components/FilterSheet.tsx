@@ -14,6 +14,8 @@ interface FilterSheetProps {
   onApply: (filters: Filters) => void;
 }
 
+const AGE_RATINGS = ['G', 'PG', 'PG-13', 'R', 'NC-17'];
+
 const ERA_OPTIONS: Array<{ value: Era; label: string; hint: string }> = [
   { value: 'all', label: 'ANY', hint: 'All years' },
   { value: 'new', label: 'NEW', hint: 'Last 2 years' },
@@ -112,6 +114,29 @@ export function FilterSheet({ visible, onClose, filters, onApply }: FilterSheetP
                   </Text>
                 </TouchableOpacity>
               ))}
+            </View>
+
+            {/* Age rating */}
+            <Text style={styles.sectionTitle}>Age rating</Text>
+            <Text style={styles.sectionHint}>TV shows match the same level: TV-G, TV-PG, TV-14, TV-MA</Text>
+            <View style={styles.streamingContainer}>
+              {AGE_RATINGS.map(r => {
+                const on = (localFilters.ageRatings ?? []).includes(r);
+                return (
+                  <TouchableOpacity
+                    key={r}
+                    style={[styles.genrePill, on && styles.genrePillActive]}
+                    onPress={() => setLocalFilters(prev => {
+                      const cur = prev.ageRatings ?? [];
+                      return { ...prev, ageRatings: on ? cur.filter(x => x !== r) : [...cur, r] };
+                    })}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                  >
+                    <Text style={[styles.genreText, on && styles.genreTextActive]}>{r}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Streaming Services */}

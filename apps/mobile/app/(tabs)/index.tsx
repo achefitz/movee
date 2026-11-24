@@ -289,6 +289,7 @@ export default function DiscoverScreen() {
   const hasActiveFilters =
     filters.genres.length > 0 ||
     filters.minRating > 0 ||
+    (filters.ageRatings?.length ?? 0) > 0 ||
     filters.contentType !== 'all' ||
     filters.era !== 'all' ||
     filters.streaming.length > 0 ||
@@ -315,7 +316,7 @@ export default function DiscoverScreen() {
     <View style={[styles.container, { paddingTop }]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>MOVEE</Text>
-        <TouchableOpacity style={styles.filterButton} onPress={() => setShowFilters(true)}>
+        <TouchableOpacity style={styles.filterButton} onPress={() => setShowFilters(true)} accessibilityRole="button" accessibilityLabel="Filters">
           <Ionicons name="options" size={24} color={Colors.accent} />
           {hasActiveFilters && (
             <View style={styles.filterBadge} />
@@ -419,6 +420,8 @@ export default function DiscoverScreen() {
           style={[styles.actionBtn, styles.skipBtn]}
           onPress={() => swipeTop('left')}
           disabled={deck.length === 0}
+          accessibilityRole="button"
+          accessibilityLabel="Skip"
         >
           <Ionicons name="close" size={30} color={Colors.skip} />
         </TouchableOpacity>
@@ -427,6 +430,8 @@ export default function DiscoverScreen() {
           style={[styles.actionBtn, styles.watchedBtn]}
           onPress={() => swipeTop('up')}
           disabled={deck.length === 0}
+          accessibilityRole="button"
+          accessibilityLabel="Seen it"
         >
           <Ionicons name="checkmark-done" size={24} color="#7B68EE" />
           <Text style={styles.watchedBtnLabel}>Seen</Text>
@@ -436,6 +441,8 @@ export default function DiscoverScreen() {
           style={[styles.actionBtn, styles.likeBtn]}
           onPress={() => swipeTop('right')}
           disabled={deck.length === 0}
+          accessibilityRole="button"
+          accessibilityLabel="Like"
         >
           <Ionicons name="heart" size={30} color={Colors.like} />
         </TouchableOpacity>

@@ -6,6 +6,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { confirmAction } from '@/utils/confirm';
 import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
 import { MediaItem } from '@/services/tmdb';
@@ -68,14 +69,14 @@ function MediaRow({
       </View>
       <View style={styles.rowActions}>
         {showCheck && (
-          <TouchableOpacity style={styles.checkBtn} onPress={handleCheck} hitSlop={8}>
+          <TouchableOpacity style={styles.checkBtn} onPress={handleCheck} hitSlop={8} accessibilityRole="button" accessibilityLabel="Mark as watched">
             <Ionicons name="checkmark-circle" size={26} color="#7B68EE" />
           </TouchableOpacity>
         )}
-        <TouchableOpacity style={styles.shareBtn} onPress={() => shareItem(item)} hitSlop={8}>
+        <TouchableOpacity style={styles.shareBtn} onPress={() => shareItem(item)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share">
           <Ionicons name="share-outline" size={20} color={Colors.textMuted} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.removeBtn} onPress={onRemove} hitSlop={12}>
+        <TouchableOpacity style={styles.removeBtn} onPress={onRemove} hitSlop={12} accessibilityRole="button" accessibilityLabel="Remove">
           <Ionicons name="close-circle" size={22} color={Colors.textMuted} />
         </TouchableOpacity>
       </View>
@@ -98,17 +99,11 @@ export default function WatchlistScreen() {
   const isEmpty = items.length === 0;
 
   function confirmRemove(id: number, isSaved: boolean) {
-    Alert.alert(
+    confirmAction(
       'Remove',
       'Remove this from your ' + (isSaved ? 'watchlist' : 'watched history') + '?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => isSaved ? removeFromSaved(id) : removeFromWatched(id),
-        },
-      ]
+      'Remove',
+      () => (isSaved ? removeFromSaved(id) : removeFromWatched(id)),
     );
   }
 

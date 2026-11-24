@@ -247,6 +247,9 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
               <Text style={styles.typeBadgeText}>{item.type === 'movie' ? 'MOVIE' : 'TV'}</Text>
             </View>
             {item.year ? <Text style={styles.year}>{item.year}</Text> : null}
+            {item.certification ? (
+              <View style={styles.certBadge}><Text style={styles.certText}>{item.certification}</Text></View>
+            ) : null}
           </View>
 
           {item.reason ? (
@@ -366,6 +369,15 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
 });
 
 const styles = StyleSheet.create({
+  certBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 8,
+  },
+  certText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
   card: {
     position: 'absolute',
     width: '100%',

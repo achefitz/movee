@@ -10,6 +10,8 @@ export type Filters = {
   era: Era;
   genres: number[];
   minRating: number;
+  /** US age ratings to allow (G, PG, PG-13, R, NC-17; TV shows use the matching TV rating). Empty = any. */
+  ageRatings: string[];
   streaming: number[];
   inTheaters: boolean;
   maxRuntime: number | null;
@@ -58,6 +60,7 @@ export const defaultFilters: Filters = {
   era: 'all',
   genres: [],
   minRating: 0,
+  ageRatings: [],
   streaming: [],
   inTheaters: false,
   maxRuntime: null,

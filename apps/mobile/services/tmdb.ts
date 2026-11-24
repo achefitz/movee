@@ -20,6 +20,8 @@ export type MediaItem = {
   runtimeMinutes?: number;
   /** 'now' = first US theatrical run; 'rerelease' = an older film back in theaters. */
   theaterStatus?: 'now' | 'rerelease';
+  /** US age rating, e.g. PG-13 or TV-MA. */
+  certification?: string;
   imdbId?: string;
   imdbUrl?: string;
   imdbRating?: number;

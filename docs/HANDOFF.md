@@ -240,3 +240,5 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 4. Trailer autoplay, Letterboxd links, onboarding.
 5. IMDb + Rotten Tomatoes ratings; correct "in theaters" / "back in theaters".
 6. Varied first decks, "Show more titles" in onboarding, follows with public/private accounts and approvals, `db:users` / `db:studio`, this handoff doc.
+7. Hosted on Render + Neon (`render.yaml`).
+8. Age-rating filter (G … NC-17, TV mapped to TV-G … TV-MA) with a badge on cards; other users' profiles (`/user/<name>`, private accounts locked until approved) reachable from Social; Profile tiles open lists of liked movies / TV / watched; fixed the ✕ remove button on web (`utils/confirm.ts`).

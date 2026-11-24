@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity,
-  ScrollView, Platform, Alert, LayoutAnimation, UIManager, Switch,
+  ScrollView, Platform, Alert, LayoutAnimation, UIManager, Switch, Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { apiFetch } from '@/services/api';
+import { TitleGrid } from '@/components/TitleGrid';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -83,7 +84,12 @@ function useViewerType(topGenreNames: string[], moviePct: number, tvPct: number,
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { profileName, stats, getTopGenres, savedItems, resetHistory } = useAppContext();
+  const { profileName, stats, getTopGenres, savedItems, watchedItems, resetHistory } = useAppContext();
+  const [statList, setStatList] = useState<null | 'movieLikes' | 'tvLikes' | 'totalWatched'>(null);
+  const statItems = statList === 'movieLikes' ? savedItems.filter(i => i.type === 'movie')
+    : statList === 'tvLikes' ? savedItems.filter(i => i.type === 'tv')
+    : statList === 'totalWatched' ? watchedItems : [];
+  const statTitle = statList === 'movieLikes' ? 'Movies you liked' : statList === 'tvLikes' ? 'TV shows you liked' : 'Watched';
   const { user, logout, setPrivate } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -160,21 +166,21 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.statsGrid}>
-        <View style={styles.statCard}>
+        <TouchableOpacity style={styles.statCard} onPress={() => setStatList('movieLikes')} activeOpacity={0.75} accessibilityRole="button" accessibilityLabel="Show movies">
           <Ionicons name={STAT_ICONS.movieLikes} size={20} color={Colors.accent} />
           <Text style={styles.statValue}>{stats.movieLikes}</Text>
           <Text style={styles.statLabel}>Movies</Text>
-        </View>
-        <View style={styles.statCard}>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.statCard} onPress={() => setStatList('tvLikes')} activeOpacity={0.75} accessibilityRole="button" accessibilityLabel="Show tv shows">
           <Ionicons name={STAT_ICONS.tvLikes} size={20} color={Colors.accent} />
           <Text style={styles.statValue}>{stats.tvLikes}</Text>
           <Text style={styles.statLabel}>TV Shows</Text>
-        </View>
-        <View style={styles.statCard}>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.statCard} onPress={() => setStatList('totalWatched')} activeOpacity={0.75} accessibilityRole="button" accessibilityLabel="Show watched">
           <Ionicons name={STAT_ICONS.totalWatched} size={20} color="#7B68EE" />
           <Text style={[styles.statValue, { color: '#7B68EE' }]}>{stats.totalWatched}</Text>
           <Text style={styles.statLabel}>Watched</Text>
-        </View>
+        </TouchableOpacity>
         <View style={styles.statCard}>
           <Ionicons name={STAT_ICONS.totalSwiped} size={20} color={Colors.textMuted} />
           <Text style={[styles.statValue, { color: Colors.textSecondary }]}>{stats.totalSwiped}</Text>
@@ -295,6 +301,22 @@ export default function ProfileScreen() {
         <Ionicons name="trash-outline" size={18} color={Colors.skip} />
         <Text style={styles.resetBtnText}>Reset All History</Text>
       </TouchableOpacity>
+
+      <Modal visible={statList !== null} animationType="slide" transparent onRequestClose={() => setStatList(null)}>
+        <View style={styles.listOverlay}>
+          <View style={styles.listSheet}>
+            <View style={styles.listHeader}>
+              <Text style={styles.listTitle}>{statTitle} ({statItems.length})</Text>
+              <TouchableOpacity onPress={() => setStatList(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
+              <TitleGrid items={[...statItems].reverse()} empty="Nothing here yet. Keep swiping!" />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={18} color={Colors.textSecondary} />
@@ -494,6 +516,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
   },
+  listOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  listSheet: {
+    backgroundColor: Colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    maxHeight: '88%', paddingTop: 16, borderTopWidth: 1, borderColor: Colors.border,
+  },
+  listHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingBottom: 14,
+  },
+  listTitle: { color: Colors.textPrimary, fontSize: 20, fontWeight: '800' },
   privacyCard: {
     flexDirection: 'row',
     alignItems: 'center',

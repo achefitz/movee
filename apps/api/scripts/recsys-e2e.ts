@@ -39,6 +39,7 @@ const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
 const isRerelease = (f: Fake) => f.type === 'movie' && f.id % 25 === 7 && f.date < iso(Date.now() - 365 * DAY);
 const usTheatrical = (f: Fake) => [f.date, ...(isRerelease(f) ? [iso(Date.now() - 10 * DAY)] : [])];
 const imdbIdOf = (f: Fake) => `tt${1000000 + f.id}`;
+const certOf = (f: Fake) => (f.type === 'movie' ? ['G', 'PG', 'PG-13', 'R'] : ['TV-G', 'TV-PG', 'TV-14', 'TV-MA'])[f.id % 4];
 const imdbRatingOf = (f: Fake) => Math.round((3 + (f.id % 60) / 10) * 10) / 10;
 const rtOf = (f: Fake) => (f.id * 7) % 101;
 const list = (f: Fake) => ({
@@ -85,6 +86,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const prov = q.get('with_watch_providers'); if (prov) { const ps = prov.split('|').map(Number); r = r.filter(f => f.providers.some(x => ps.includes(x))); }
     const gte = q.get(`${df}.gte`); if (gte) r = r.filter(f => f.date >= gte);
     const lte = q.get(`${df}.lte`); if (lte) r = r.filter(f => f.date <= lte);
+    const cert = q.get('certification'); if (cert) { const cs = cert.split('|'); r = r.filter(f => cs.includes(certOf(f))); }
     const rg = q.get('release_date.gte'), rl = q.get('release_date.lte');
     if (rg || rl) r = r.filter(f => usTheatrical(f).some(d => (!rg || d >= rg) && (!rl || d <= rl)));
     const va = q.get('vote_average.gte'); if (va) r = r.filter(f => f.vote >= Number(va));
@@ -112,7 +114,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       'watch/providers': { results: { US: { flatrate: f.providers.map(provider_id => ({ provider_id })), link: 'https://x' } } },
       imdb_id: f.type === 'movie' ? imdbIdOf(f) : undefined,
       external_ids: { imdb_id: imdbIdOf(f) },
-      release_dates: { results: [{ iso_3166_1: 'US', release_dates: usTheatrical(f).map((d, i) => ({ release_date: `${d}T00:00:00.000Z`, type: i === 0 ? 3 : 2, note: i ? 'Re-release' : '' })) }] },
+      release_dates: { results: [{ iso_3166_1: 'US', release_dates: usTheatrical(f).map((d, i) => ({ release_date: `${d}T00:00:00.000Z`, type: i === 0 ? 3 : 2, note: i ? 'Re-release' : '', certification: certOf(f) })) }] },
+      content_ratings: { results: [{ iso_3166_1: 'US', rating: certOf(f) }] },
     });
   }
   return new Response('unknown', { status: 404 });
@@ -407,6 +410,37 @@ try {
   await call('DELETE', `${F}/sim1`, undefined, aliceT);
   assert.ok((await call('GET', F, undefined, aliceT)).body.following.every((f: any) => f.username !== '@sim1'));
   ok('unfollow');
+
+  // 14. Age ratings
+  const kids = (await post('/deck', { userId: 'parent', limit: 20, filters: { ageRatings: ['G', 'PG'] } })).body.items as any[];
+  assert.ok(kids.length > 0, 'no G/PG cards');
+  for (const i of kids) {
+    const f = byKey.get(i.key)!;
+    assert.ok(['G', 'PG', 'TV-G', 'TV-PG'].includes(certOf(f)), `${i.key} is ${certOf(f)}`);
+    assert.equal(i.certification, certOf(f));
+  }
+  ok(`age-rating filter G+PG: ${kids.length} cards, all G/PG (TV-G/TV-PG for shows), rating shown on each`);
+
+  // 15. Profiles
+  const U = `${root}/users`;
+  const prof = await call('GET', `${U}/sim3`, undefined, aliceT);
+  assert.equal(prof.status, 200);
+  assert.ok(prof.body.canView && prof.body.liked.length > 0 && prof.body.liked.every((i: any) => i.title));
+  ok(`public profile: anyone signed in sees likes (${prof.body.liked.length}) and watches`);
+  const sim4T = await tokenFor('sim4');
+  await call('PATCH', `${A}/me`, { isPrivate: true }, sim4T);
+  const hidden = await call('GET', `${U}/sim4`, undefined, aliceT);
+  assert.equal(hidden.body.canView, false); assert.equal(hidden.body.liked.length, 0);
+  assert.equal(hidden.body.user.isPrivate, true);
+  await call('POST', F, { username: 'sim4' }, aliceT);
+  assert.equal((await call('GET', `${U}/sim4`, undefined, aliceT)).body.followStatus, 'pending');
+  await call('POST', `${F}/requests/alice/approve`, undefined, sim4T);
+  const shown = await call('GET', `${U}/sim4`, undefined, aliceT);
+  assert.ok(shown.body.canView && shown.body.liked.length > 0);
+  const back = await call('GET', `${U}/alice`, undefined, sim4T);
+  assert.equal(back.body.followsYou, true);
+  assert.equal((await call('GET', `${U}/nobody_here`, undefined, aliceT)).status, 404);
+  ok('private profile hidden until approved; "follows you" shown; unknown → 404');
 
   // 13. Varied first decks + onboarding "show more"
   const firsts = await Promise.all(['fresh_a', 'fresh_b', 'fresh_c'].map(async n => (await post('/deck', { userId: n, limit: 15 })).body.items.map((i: any) => i.key) as string[]));

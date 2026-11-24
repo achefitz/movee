@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { ApiError, apiFetch } from '@/services/api';
 import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
@@ -145,6 +146,10 @@ export default function SocialScreen() {
     });
     return () => { cancelled = true; };
   }, [currentUser]);
+
+  const openProfile = useCallback((username: string) => {
+    router.push({ pathname: '/user/[username]', params: { username: username.replace(/^@/, '') } });
+  }, []);
 
   const refreshFollows = useCallback(async () => {
     const [lists, events] = await Promise.all([loadFollows(), loadFriendsActivity()]);
@@ -322,10 +327,18 @@ export default function SocialScreen() {
             <Text style={styles.sectionTitle}>Requests ({requests.length})</Text>
             {requests.map(r => (
               <View key={r.username} style={styles.friendRow}>
-                <View style={styles.friendAvatar}>
-                  <Text style={styles.friendAvatarText}>{r.username[1]?.toUpperCase() ?? '?'}</Text>
-                </View>
-                <Text style={styles.friendName}>{r.username}</Text>
+                <TouchableOpacity
+                  style={styles.profileLink}
+                  onPress={() => openProfile(r.username)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${r.username}'s profile`}
+                >
+                  <View style={styles.friendAvatar}>
+                    <Text style={styles.friendAvatarText}>{r.username[1]?.toUpperCase() ?? '?'}</Text>
+                  </View>
+                  <Text style={styles.friendName} numberOfLines={1}>{r.username}</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.approveBtn}
                   onPress={() => handleRequest(r.username, 'approve')}
@@ -356,10 +369,18 @@ export default function SocialScreen() {
           ) : (
             friends.map(friend => (
               <View key={friend.username} style={styles.friendRow}>
-                <View style={styles.friendAvatar}>
-                  <Text style={styles.friendAvatarText}>{friend.username[1]?.toUpperCase() ?? '?'}</Text>
-                </View>
-                <Text style={styles.friendName}>{friend.username}</Text>
+                <TouchableOpacity
+                  style={styles.profileLink}
+                  onPress={() => openProfile(friend.username)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${friend.username}'s profile`}
+                >
+                  <View style={styles.friendAvatar}>
+                    <Text style={styles.friendAvatarText}>{friend.username[1]?.toUpperCase() ?? '?'}</Text>
+                  </View>
+                  <Text style={styles.friendName} numberOfLines={1}>{friend.username}</Text>
+                </TouchableOpacity>
                 {friend.status === 'pending' ? (
                   <View style={styles.pendingPill}>
                     <Ionicons name="lock-closed" size={11} color={Colors.textSecondary} />
@@ -399,10 +420,18 @@ export default function SocialScreen() {
           ) : (
             followers.map(f => (
               <View key={f.username} style={styles.friendRow}>
-                <View style={styles.friendAvatar}>
-                  <Text style={styles.friendAvatarText}>{f.username[1]?.toUpperCase() ?? '?'}</Text>
-                </View>
-                <Text style={styles.friendName}>{f.username}</Text>
+                <TouchableOpacity
+                  style={styles.profileLink}
+                  onPress={() => openProfile(f.username)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${f.username}'s profile`}
+                >
+                  <View style={styles.friendAvatar}>
+                    <Text style={styles.friendAvatarText}>{f.username[1]?.toUpperCase() ?? '?'}</Text>
+                  </View>
+                  <Text style={styles.friendName} numberOfLines={1}>{f.username}</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.removeBtn}
                   onPress={() => handleRemoveFollower(f.username)}
@@ -475,7 +504,11 @@ export default function SocialScreen() {
                       </View>
                     )}
                     <View style={styles.activityInfo}>
-                      <Text style={styles.activityActor} numberOfLines={1}>{event.actorLabel}</Text>
+                      <Text
+                        style={styles.activityActor}
+                        numberOfLines={1}
+                        onPress={event.isMine ? undefined : () => { setActivityModalVisible(false); openProfile(event.actorLabel); }}
+                      >{event.actorLabel}</Text>
                       <Text style={styles.activityTitle} numberOfLines={1}>{event.item.title}</Text>
                       <View style={styles.activityMeta}>
                         <View style={[styles.typeBadge, event.action === 'liked' ? styles.typeBadgeLiked : styles.typeBadgeWatched]}>
@@ -704,6 +737,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 12,
   },
+  profileLink: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
   friendRow: {
     flexDirection: 'row',
     alignItems: 'center',

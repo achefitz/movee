@@ -60,6 +60,8 @@ export type DeckItem = {
   inTheaters: boolean;
   /** 'now' = first US theatrical run; 'rerelease' = an older film back in theaters. */
   theaterStatus?: 'now' | 'rerelease';
+  /** US age rating, e.g. PG-13 or TV-MA. */
+  certification?: string;
   imdbId?: string;
   imdbUrl?: string;
   imdbRating?: number;
@@ -105,6 +107,7 @@ export function toMediaItem(it: CatalogItem): Omit<DeckItem, 'impressionId' | 'r
     inTheaters: !!theaterStatus(it),
     theaterStatus: theaterStatus(it) || undefined,
     ...ratingsOf(it),
+    certification: it.certification || undefined,
     watchLink: it.watchLink ?? null,
     runtimeMinutes: it.runtime ?? undefined,
   };

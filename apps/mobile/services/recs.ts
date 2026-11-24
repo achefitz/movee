@@ -22,6 +22,7 @@ export async function fetchDeck(
         streaming: filters.streaming,
         era: filters.era,
         minRating: filters.minRating,
+        ageRatings: filters.ageRatings ?? [],
         maxRuntime: filters.maxRuntime,
         inTheaters: filters.inTheaters,
       },

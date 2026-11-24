@@ -21,12 +21,13 @@ const FiltersSchema = z.object({
   streaming: z.array(z.number().int()).max(30).default([]),
   era: z.enum(['all', 'new', 'classic']).default('all'),
   minRating: z.number().min(0).max(10).default(0),
+  ageRatings: z.array(z.enum(['G', 'PG', 'PG-13', 'R', 'NC-17'])).max(5).default([]),
   maxRuntime: z.number().int().positive().max(600).nullable().default(null),
   inTheaters: z.boolean().default(false),
 });
 
 const DeckBody = z.object({
-  filters: FiltersSchema.default(DEFAULT_FILTERS),
+  filters: FiltersSchema.default({ ...DEFAULT_FILTERS, ageRatings: [] }),
   exclude: z.array(Key).max(300).default([]),
   limit: z.number().int().min(1).max(40).default(20),
 });

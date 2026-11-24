@@ -1,4 +1,5 @@
 import { theaterStatus } from './theaters';
+import { allowedCertifications } from '../ratings/certification';
 import type { CatalogItem, DeckFilters, MediaType } from './types';
 
 /** "New release" = released within the last 2 years. */
@@ -63,11 +64,16 @@ export function matchesFilters(item: CatalogItem, f: DeckFilters, now = Date.now
 
   if (f.minRating > 0 && item.voteAverage < f.minRating) return 'no';
 
+  let unknown = false;
+  if (f.ageRatings.length > 0) {
+    if (item.certification === undefined) unknown = true; // details not fetched yet
+    else if (!item.certification || !allowedCertifications(item.type, f.ageRatings).includes(item.certification)) return 'no';
+  }
+
   if (f.maxRuntime != null && item.type === 'movie' && item.runtime && item.runtime > f.maxRuntime) {
     return 'no';
   }
 
-  let unknown = false;
   if (f.inTheaters) {
     // New releases and re-releases currently showing in US theaters.
     const status = theaterStatus(item, now);
