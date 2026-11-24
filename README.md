@@ -69,3 +69,11 @@ blended with logistic regression ranks them from engineered features (target/cou
 encodings, your genre/era affinities, similarity to what you liked vs skipped). It
 retrains in the background as swipes come in and only replaces the hand-tuned starting
 ranker when it scores better on the newest swipes. Details in `CLAUDE.md`.
+
+## Data sources
+
+- [TMDB](https://www.themoviedb.org/) for titles, posters, trailers, streaming availability and release dates.
+  This product uses the TMDB API but is not endorsed or certified by TMDB.
+- IMDb ratings from IMDb's [non-commercial datasets](https://developer.imdb.com/non-commercial-datasets/)
+  (personal and non-commercial use only).
+- Rotten Tomatoes Tomatometer scores via [Wikidata](https://www.wikidata.org/) (CC0).

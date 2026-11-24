@@ -1,3 +1,4 @@
+import { theaterStatus } from './theaters';
 import type { CatalogItem, DeckFilters, MediaType } from './types';
 
 /** "New release" = released within the last 2 years. */
@@ -41,8 +42,8 @@ export function typesFor(f: DeckFilters): MediaType[] {
 export type MatchResult = 'yes' | 'no' | 'unknown';
 
 /**
- * Exact filter check. Returns 'unknown' when the only open question is streaming
- * availability for an item whose providers haven't been fetched yet.
+ * Exact filter check. Returns 'unknown' when the only open questions need the detail
+ * fetch (streaming providers, US theatrical dates) and that hasn't happened yet.
  */
 export function matchesFilters(item: CatalogItem, f: DeckFilters, now = Date.now()): MatchResult {
   if (!typesFor(f).includes(item.type)) return 'no';
@@ -66,13 +67,19 @@ export function matchesFilters(item: CatalogItem, f: DeckFilters, now = Date.now
     return 'no';
   }
 
-  if (f.inTheaters && !item.inTheaters) return 'no';
+  let unknown = false;
+  if (f.inTheaters) {
+    // New releases and re-releases currently showing in US theaters.
+    const status = theaterStatus(item, now);
+    if (status === undefined) unknown = true;
+    else if (status === null) return 'no';
+  }
 
   if (f.streaming.length > 0) {
-    if (!item.providers) return 'unknown';
-    if (!item.providers.some(p => f.streaming.includes(p))) return 'no';
+    if (!item.providers) unknown = true;
+    else if (!item.providers.some(p => f.streaming.includes(p))) return 'no';
   }
-  return 'yes';
+  return unknown ? 'unknown' : 'yes';
 }
 
 /** Stable cache key for a filter set (order-insensitive). */

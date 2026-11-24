@@ -18,6 +18,15 @@ export type MediaItem = {
   inTheaters: boolean;
   watchLink: string | null;
   runtimeMinutes?: number;
+  /** 'now' = first US theatrical run; 'rerelease' = an older film back in theaters. */
+  theaterStatus?: 'now' | 'rerelease';
+  imdbId?: string;
+  imdbUrl?: string;
+  imdbRating?: number;
+  imdbVotes?: number;
+  /** Rotten Tomatoes Tomatometer, 0–100. */
+  rtScore?: number;
+  rtUrl?: string;
   /** Set on cards served by the recommender (/api/recs/deck). */
   key?: string;
   impressionId?: string;

@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { NativeYoutubePlayer } from './NativeYoutubePlayer';
 import { WebTrailer } from './WebTrailer';
 import { letterboxdUrl } from '../constants/links';
+import { Ratings } from './Ratings';
 import { MediaItem } from '../services/tmdb';
 import Colors from '../constants/colors';
 import { SVC, AMC_URL } from '../constants/streaming';
@@ -262,10 +263,8 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
           <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
 
           <View style={styles.metaRow}>
-            <Ionicons name="star" size={14} color={Colors.accent} />
-            <Text style={styles.rating}>{item.rating.toFixed(1)}</Text>
-            <Text style={styles.ratingSource}>TMDB</Text>
-            {item.genreNames.slice(0, 2).map(g => (
+            <Ratings item={item} />
+            {item.genreNames.slice(0, item.imdbRating && item.rtScore !== undefined ? 1 : 2).map(g => (
               <View key={g} style={styles.genreTag}>
                 <Text style={styles.genreText}>{g}</Text>
               </View>
@@ -312,7 +311,9 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
                   activeOpacity={0.8}
                 >
                   <Ionicons name="film" size={10} color="#F5C518" style={{ marginRight: 3 }} />
-                  <Text style={styles.theaterBadgeText}>IN THEATERS</Text>
+                  <Text style={styles.theaterBadgeText}>
+                    {item.theaterStatus === 'rerelease' ? 'BACK IN THEATERS' : 'IN THEATERS'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -415,13 +416,6 @@ const styles = StyleSheet.create({
   videoLayer: {
     overflow: 'hidden',
     backgroundColor: '#000',
-  },
-  ratingSource: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-    marginLeft: -2,
-    marginRight: 4,
   },
   letterboxdBadge: {
     flexDirection: 'row',

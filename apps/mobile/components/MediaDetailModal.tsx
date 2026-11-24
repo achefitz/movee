@@ -11,6 +11,7 @@ import { MediaItem, fetchMediaDetails, MediaDetails } from '../services/tmdb';
 import Colors from '../constants/colors';
 import { SVC, AMC_URL } from '../constants/streaming';
 import { letterboxdUrl } from '../constants/links';
+import { Ratings } from './Ratings';
 import { shareItem } from '../utils/share';
 
 interface Props {
@@ -85,14 +86,13 @@ export function MediaDetailModal({ visible, item, onClose, onLike, onSkip, onWat
                 <Text style={styles.typeBadgeText}>{item.type === 'movie' ? 'MOVIE' : 'TV'}</Text>
               </View>
               {item.year ? <Text style={styles.year}>{item.year}</Text> : null}
-              <View style={styles.ratingRow}>
-                <Ionicons name="star" size={14} color={Colors.accent} />
-                <Text style={styles.rating}>{item.rating.toFixed(1)}</Text>
-                <Text style={styles.ratingSource}>on TMDB</Text>
-              </View>
             </View>
 
             <Text style={styles.title}>{item.title}</Text>
+
+            <View style={styles.ratingsBlock}>
+              <Ratings item={item} size="lg" linked />
+            </View>
 
             {lbUrl && (
               <TouchableOpacity
@@ -181,7 +181,9 @@ export function MediaDetailModal({ visible, item, onClose, onLike, onSkip, onWat
                       activeOpacity={0.8}
                     >
                       <Ionicons name="film" size={12} color={Colors.accent} style={{ marginRight: 4 }} />
-                      <Text style={styles.theaterBadgeText}>IN THEATERS</Text>
+                      <Text style={styles.theaterBadgeText}>
+                        {item.theaterStatus === 'rerelease' ? 'BACK IN THEATERS' : 'IN THEATERS'}
+                      </Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -279,9 +281,9 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 13,
   },
-  ratingSource: {
-    color: Colors.textMuted,
-    fontSize: 12,
+  ratingsBlock: {
+    marginTop: 2,
+    marginBottom: 12,
   },
   letterboxdBtn: {
     flexDirection: 'row',

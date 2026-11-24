@@ -67,6 +67,15 @@ Setup and commands for humans are in `README.md`.
   favorite genres, then 20 popular titles to pick favorites. Server: `routes/onboarding.ts`; genres are
   stored on the user and seed the taste profile (`buildProfile(..., favoriteGenres)`); picked titles are
   saved as `seen_up` swipes.
+- Ratings (`components/Ratings.tsx`): IMDb from IMDb's official daily dataset
+  (`apps/api/src/ratings/imdb.ts`: downloads `title.ratings.tsv.gz` once a day, cached on disk at
+  `IMDB_CACHE_FILE` or the temp dir, kept in memory; IMDb allows it for personal/non-commercial use) and
+  the Rotten Tomatoes Tomatometer from Wikidata (`ratings/rottenTomatoes.ts`, SPARQL by IMDb id, latest
+  Tomatometer statement; cached on the catalog item for 14 days). IMDb ids come from TMDB `external_ids`.
+  No logos, plain labels.
+- In theaters (`apps/api/src/recsys/theaters.ts`): from TMDB `release_dates` (US types 2/3), computed
+  when served, never stored. 'now' = first US theatrical run ≤60 days ago and the film is <1 year old;
+  'rerelease' = an older film back in US theaters in the last 30 days (shown as "BACK IN THEATERS").
 - Letterboxd: `constants/links.ts` (`letterboxd.com/tmdb/<id>`, movies only; Letterboxd has no TV).
   Shown on movie cards and in the details sheet. No Letterboxd rating: their API needs approval.
 - `components/FilterSheet.tsx`: content type, Release (Any / New = last 2 yrs / Oldies = pre-2000),

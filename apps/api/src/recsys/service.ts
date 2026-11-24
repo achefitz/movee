@@ -5,6 +5,9 @@ import { Worker } from 'node:worker_threads';
 import { Catalog } from './catalog';
 import { FEATURE_VERSION, featureIndex } from './features';
 import { matchesFilters } from './filters';
+import { theaterStatus } from './theaters';
+import { imdbRatings, imdbUrl } from '../ratings/imdb';
+import { fetchRottenTomatoes } from '../ratings/rottenTomatoes';
 import { generateCandidates, rerank, scoreCandidates, type Candidate, type Scored } from './pipeline';
 import { buildProfile, canonicalGenres, noveltyTest } from './profile';
 import { MIN_TRAINING_ROWS, trainRanker, type EnsembleModel, type Ranker, type TrainReport, type TrainingRow } from './ranker';
@@ -23,6 +26,8 @@ const RETRAIN_EVERY_NEW_ROWS = 50;
 const RETRAIN_MIN_INTERVAL = 10 * 60_000;
 const CONTENT_POOL_MAX = 6000;
 const I2I_SEEDS = 12;
+const RT_TTL = 14 * 24 * 3600_000;
+const RT_WAIT_MS = 2500;
 const BAYES_IDX = featureIndex('item_bayes_rating');
 
 const GENRE_NAMES: Record<number, string> = {
@@ -51,11 +56,32 @@ export type DeckItem = {
   year: string;
   streamingIds: number[];
   inTheaters: boolean;
+  /** 'now' = first US theatrical run; 'rerelease' = an older film back in theaters. */
+  theaterStatus?: 'now' | 'rerelease';
+  imdbId?: string;
+  imdbUrl?: string;
+  imdbRating?: number;
+  imdbVotes?: number;
+  /** Rotten Tomatoes Tomatometer, 0–100. */
+  rtScore?: number;
+  rtUrl?: string;
   watchLink: string | null;
   runtimeMinutes?: number;
   impressionId: string;
   reason?: string;
 };
+
+function ratingsOf(it: CatalogItem) {
+  const imdb = imdbRatings.get(it.imdbId);
+  return {
+    imdbId: it.imdbId ?? undefined,
+    imdbUrl: it.imdbId ? imdbUrl(it.imdbId) : undefined,
+    imdbRating: imdb?.rating,
+    imdbVotes: imdb?.votes,
+    rtScore: it.rt?.score ?? undefined,
+    rtUrl: it.rt?.url ?? undefined,
+  };
+}
 
 /** Catalog item in the app's MediaItem shape. */
 export function toMediaItem(it: CatalogItem): Omit<DeckItem, 'impressionId' | 'reason'> {
@@ -74,7 +100,9 @@ export function toMediaItem(it: CatalogItem): Omit<DeckItem, 'impressionId' | 'r
     genreNames: it.genres.map(g => GENRE_NAMES[g]).filter(Boolean),
     year: String(yearOf(it) ?? ''),
     streamingIds: it.providers ?? [],
-    inTheaters: !!it.inTheaters,
+    inTheaters: !!theaterStatus(it),
+    theaterStatus: theaterStatus(it) || undefined,
+    ...ratingsOf(it),
     watchLink: it.watchLink ?? null,
     runtimeMinutes: it.runtime ?? undefined,
   };
@@ -102,6 +130,7 @@ export class RecsService {
   }
 
   async init() {
+    imdbRatings.start(this.log);
     await this.catalog.warm();
     this.model = await this.store.loadLatestModel(FEATURE_VERSION);
     if (this.model) this.lastReport = this.model.metrics;
@@ -173,7 +202,8 @@ export class RecsService {
     const second = scoreCandidates(shortlist, enriched, keep, profile, this.stats, this.model, now);
     const ranked = rerank(second, profile.n, limit, isNovel) as Array<Scored & { cand: Candidate }>;
 
-    const out = ranked.map(s => this.toDeckItem(s, histItems));
+    await this.refreshRottenTomatoes(ranked.map(s => s.item));
+    const out = ranked.map(s => this.toDeckItem({ ...s, item: this.catalog.known.get(s.item.key) ?? s.item }, histItems));
     await this.store.logImpressions(ranked.map((s, i) => ({
       id: out[i].impressionId,
       userId,
@@ -231,6 +261,21 @@ export class RecsService {
     for (let i = 0; i < keys.length; i++) {
       await this.store.upsertInteraction({ userId, itemKey: keys[i], action: 'seen_up', ts: now - keys.length + i }, null);
     }
+  }
+
+  /**
+   * Fill in Rotten Tomatoes scores for cards about to be served (cached 14 days, so
+   * this is usually a no-op). Never holds the deck up for more than RT_WAIT_MS.
+   */
+  private async refreshRottenTomatoes(items: CatalogItem[]) {
+    const now = Date.now();
+    const need = items.filter(it => it.imdbId && (!it.rt || now - it.rt.at > RT_TTL));
+    if (!need.length) return;
+    const work = fetchRottenTomatoes(need.map(it => it.imdbId!)).then(async found => {
+      const updated = need.map(it => ({ ...it, rt: { ...(found.get(it.imdbId!) ?? { score: null, url: null }), at: Date.now() } }));
+      await this.catalog.remember(updated);
+    }).catch(err => this.log.warn({ err: err.message }, 'Rotten Tomatoes lookup failed'));
+    await Promise.race([work, new Promise(r => setTimeout(r, RT_WAIT_MS))]);
   }
 
   /** A user's recent likes and watches (newest first), for friends' activity feeds. */

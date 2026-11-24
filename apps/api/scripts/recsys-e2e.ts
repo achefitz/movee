@@ -12,6 +12,7 @@ import { CLASSIC_BEFORE, newReleaseCutoff } from '../src/recsys/filters';
 delete process.env.DATABASE_URL;
 process.env.TMDB_API_KEY = 'fake';
 process.env.SIGNUP_LIMIT_PER_HOUR = '1000'; // the test signs up ~30 users from one IP
+process.env.IMDB_CACHE_FILE = `${(await import('node:os')).tmpdir()}/movee-e2e-imdb-${process.pid}.tsv.gz`;
 
 // ------------------------------------------------------------------ fake TMDB
 const rng = mulberry32(3);
@@ -32,6 +33,14 @@ for (let i = 1; i <= 900; i++) {
     providers: PROVIDERS.filter(() => rng() < 0.2), kw: [Math.floor(rng() * 50), Math.floor(rng() * 50)],
   });
 }
+const DAY = 86400_000;
+const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+// Every 25th older movie has a re-release in US theaters 10 days ago (like an IMAX return).
+const isRerelease = (f: Fake) => f.type === 'movie' && f.id % 25 === 7 && f.date < iso(Date.now() - 365 * DAY);
+const usTheatrical = (f: Fake) => [f.date, ...(isRerelease(f) ? [iso(Date.now() - 10 * DAY)] : [])];
+const imdbIdOf = (f: Fake) => `tt${1000000 + f.id}`;
+const imdbRatingOf = (f: Fake) => Math.round((3 + (f.id % 60) / 10) * 10) / 10;
+const rtOf = (f: Fake) => (f.id * 7) % 101;
 const list = (f: Fake) => ({
   id: f.id, title: f.type === 'movie' ? `Movie ${f.id}` : undefined, name: f.type === 'tv' ? `Show ${f.id}` : undefined,
   poster_path: `/p${f.id}.jpg`, backdrop_path: null, overview: 'x', genre_ids: f.genres,
@@ -42,6 +51,26 @@ let tmdbCalls = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = new URL(String(input));
+  if (url.hostname === 'datasets.imdbws.com') {
+    const { gzipSync } = await import('node:zlib');
+    const tsv = ['tconst\taverageRating\tnumVotes', ...fakes.map(f => `${imdbIdOf(f)}\t${imdbRatingOf(f)}\t${1000 + f.id}`)].join('\n');
+    return new Response(gzipSync(tsv), { status: 200 });
+  }
+  if (url.hostname === 'query.wikidata.org') {
+    const ids = [...(url.searchParams.get('query') ?? '').matchAll(/"(tt\d+)"/g)].map(m => m[1]);
+    const bindings = ids.flatMap(id => {
+      const f = fakes.find(x => imdbIdOf(x) === id);
+      if (!f) return [];
+      const v = (s: string) => ({ value: s });
+      return [
+        // An older score, the current one, and a non-Tomatometer "x/10" average that must be ignored.
+        { imdb: v(id), score: v(`${Math.max(0, rtOf(f) - 5)}%`), date: v('2020-01-01T00:00:00Z'), method: v('http://www.wikidata.org/entity/Q108403393'), rtid: v(`m/fake_${f.id}`) },
+        { imdb: v(id), score: v(`${rtOf(f)}%`), date: v('2025-06-01T00:00:00Z'), method: v('http://www.wikidata.org/entity/Q108403393'), rtid: v(`m/fake_${f.id}`) },
+        { imdb: v(id), score: v('6.5/10'), date: v('2026-01-01T00:00:00Z'), method: v('http://www.wikidata.org/entity/Q108403540'), rtid: v(`m/fake_${f.id}`) },
+      ];
+    });
+    return new Response(JSON.stringify({ results: { bindings } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
   if (url.hostname !== 'api.themoviedb.org') return realFetch(input, init);
   tmdbCalls++;
   const q = url.searchParams;
@@ -56,6 +85,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const prov = q.get('with_watch_providers'); if (prov) { const ps = prov.split('|').map(Number); r = r.filter(f => f.providers.some(x => ps.includes(x))); }
     const gte = q.get(`${df}.gte`); if (gte) r = r.filter(f => f.date >= gte);
     const lte = q.get(`${df}.lte`); if (lte) r = r.filter(f => f.date <= lte);
+    const rg = q.get('release_date.gte'), rl = q.get('release_date.lte');
+    if (rg || rl) r = r.filter(f => usTheatrical(f).some(d => (!rg || d >= rg) && (!rl || d <= rl)));
     const va = q.get('vote_average.gte'); if (va) r = r.filter(f => f.vote >= Number(va));
     const vc = q.get('vote_count.gte'); if (vc) r = r.filter(f => f.votes >= Number(vc));
     r.sort((a, b) => q.get('sort_by') === 'vote_average.desc' ? b.vote - a.vote : b.pop - a.pop);
@@ -79,6 +110,9 @@ globalThis.fetch = (async (input: any, init?: any) => {
       credits: { cast: [{ id: f.id % 40, order: 0 }], crew: [] },
       aggregate_credits: { cast: [{ id: f.id % 40, order: 0 }] },
       'watch/providers': { results: { US: { flatrate: f.providers.map(provider_id => ({ provider_id })), link: 'https://x' } } },
+      imdb_id: f.type === 'movie' ? imdbIdOf(f) : undefined,
+      external_ids: { imdb_id: imdbIdOf(f) },
+      release_dates: { results: [{ iso_3166_1: 'US', release_dates: usTheatrical(f).map((d, i) => ({ release_date: `${d}T00:00:00.000Z`, type: i === 0 ? 3 : 2, note: i ? 'Re-release' : '' })) }] },
     });
   }
   return new Response('unknown', { status: 404 });
@@ -278,6 +312,49 @@ try {
   ok('first deck leans towards picked genres and skips picked favorites');
   assert.equal((await call('POST', O, { genres: [], favorites: [] }, await tokenFor('skipper'))).body.user.onboarded, true);
   ok('skipping onboarding marks it done');
+
+  // 12. Ratings + in-theaters
+  const rd = (await post('/deck', { userId: 'ratings_fan', limit: 20 })).body.items as any[];
+  const withImdb = rd.filter(i => typeof i.imdbRating === 'number');
+  assert.ok(withImdb.length >= 15, `only ${withImdb.length}/20 cards have an IMDb rating`);
+  assert.ok(withImdb.every(i => i.imdbRating === imdbRatingOf(byKey.get(i.key)!) && i.imdbUrl === `https://www.imdb.com/title/${imdbIdOf(byKey.get(i.key)!)}/`));
+  ok(`IMDb rating + link on ${withImdb.length}/20 cards, matching the dataset`);
+  const withRt = rd.filter(i => typeof i.rtScore === 'number');
+  assert.ok(withRt.length >= 15, `only ${withRt.length}/20 cards have an RT score`);
+  assert.ok(withRt.every(i => i.rtScore === rtOf(byKey.get(i.key)!) && /^https:\/\/www\.rottentomatoes\.com\/m\/fake_\d+$/.test(i.rtUrl)));
+  ok(`Rotten Tomatoes: latest Tomatometer on ${withRt.length}/20 cards (older scores and x/10 averages ignored)`);
+
+  const td = (await post('/deck', { userId: 'theater_goer', limit: 30, filters: { inTheaters: true } })).body.items as any[];
+  assert.ok(td.length > 0, 'no in-theaters cards');
+  for (const i of td) {
+    const f = byKey.get(i.key)!;
+    const expected = isRerelease(f) ? 'rerelease' : 'now';
+    assert.equal(i.theaterStatus, expected, `${i.key} (${f.date}) should be ${expected}, got ${i.theaterStatus}`);
+    if (expected === 'now') assert.ok(f.date >= iso(Date.now() - 60 * DAY), `${i.key} from ${f.date} marked in theaters`);
+  }
+  const rer = td.filter(i => i.theaterStatus === 'rerelease').length;
+  ok(`in-theaters: ${td.length - rer} new releases + ${rer} re-releases, each labelled correctly`);
+  {
+    const { theaterStatus } = await import('../src/recsys/theaters');
+    const movie = (first: string | null, latest: string | null, releaseDate: string | null = first) =>
+      ({ type: 'movie', releaseDate, usTheatrical: { first, latest } }) as any;
+    const d = (n: number) => iso(Date.now() - n * DAY);
+    assert.equal(theaterStatus(movie(d(20), d(20))), 'now');
+    assert.equal(theaterStatus(movie(d(59), d(59))), 'now');
+    assert.equal(theaterStatus(movie(d(90), d(90))), null);
+    assert.equal(theaterStatus(movie('2019-07-26', d(5))), 'rerelease');          // Once Upon a Time… IMAX return
+    assert.equal(theaterStatus(movie(d(18), d(18), '1991-10-10')), 'rerelease');  // Raise the Red Lantern: TMDB lacks the 1992 US run
+    assert.equal(theaterStatus(movie(d(40), d(40), d(200))), 'now');             // festival film, US debut this autumn
+    assert.equal(theaterStatus(movie('2019-07-26', d(45))), null);                // re-release run over
+    assert.equal(theaterStatus(movie(iso(Date.now() + 9 * DAY), iso(Date.now() + 9 * DAY))), null); // not out yet
+    assert.equal(theaterStatus({ type: 'tv' } as any), null);
+    assert.equal(theaterStatus({ type: 'movie' } as any), undefined);           // dates not fetched yet
+    ok('theater rule: new = first US run ≤60 days ago (film <1 yr old), re-release = back ≤30 days, never future or TV');
+  }
+  const everyday = (await post('/deck', { userId: 'ratings_fan', limit: 20 })).body.items as any[];
+  assert.ok(everyday.every(i => !i.inTheaters || byKey.get(i.key)!.date >= iso(Date.now() - 60 * DAY) || isRerelease(byKey.get(i.key)!)),
+    'an old film without a re-release is marked in theaters');
+  ok('old films are never "in theaters" unless they are actually back in theaters');
 
   // 10. Friends
   const F = `${root}/friends`;

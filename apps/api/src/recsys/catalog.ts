@@ -1,4 +1,5 @@
 import { tmdbJson } from '../lib/tmdb';
+import { NEW_RELEASE_RUN_DAYS, usTheatricalDates } from './theaters';
 import { CLASSIC_BEFORE, filterKey, genresFor, isoDaysAgo, newReleaseCutoff, typesFor } from './filters';
 import type { RecsStore } from './store';
 import { itemKey, parseKey, type CatalogItem, type DeckFilters, type MediaType } from './types';
@@ -7,7 +8,8 @@ const REGION = 'US';
 const POOL_TTL = 30 * 60_000;
 const I2I_TTL = 24 * 3600_000;
 const DETAILS_TTL = 7 * 24 * 3600_000;
-const THEATER_WINDOW_DAYS = 45;
+// Discover window for the in-theaters filter; theaters.ts decides what actually counts.
+const THEATER_WINDOW_DAYS = NEW_RELEASE_RUN_DAYS;
 
 export type Pools = { popular: string[]; topRated: string[]; explore: string[] };
 
@@ -43,8 +45,6 @@ function fromListResult(raw: any, type: MediaType, now = Date.now()): CatalogIte
     popularity: raw.popularity ?? 0,
     language: raw.original_language ?? 'en',
     runtime: null,
-    inTheaters: type === 'movie' && !!releaseDate
-      && releaseDate >= isoDaysAgo(THEATER_WINDOW_DAYS, now) && releaseDate <= isoDaysAgo(0, now),
   };
 }
 
@@ -59,6 +59,9 @@ function merge(prev: CatalogItem | undefined, next: CatalogItem): CatalogItem {
     cast: next.cast ?? prev.cast,
     providers: next.providers ?? prev.providers,
     watchLink: next.watchLink ?? prev.watchLink,
+    usTheatrical: next.usTheatrical ?? prev.usTheatrical,
+    imdbId: next.imdbId !== undefined ? next.imdbId : prev.imdbId,
+    rt: next.rt ?? prev.rt,
     detailsFetchedAt: next.detailsFetchedAt ?? prev.detailsFetchedAt,
   };
 }
@@ -181,7 +184,6 @@ export class Catalog {
       });
 
       const all = results.flatMap(r => r.items);
-      if (f.inTheaters) for (const it of all) it.inTheaters = true;
       await this.remember(all);
 
       // Interleave movie/TV per mode so neither type dominates the top of the list.
@@ -239,7 +241,10 @@ export class Catalog {
    * (append_to_response). Only re-fetched after a week.
    */
   async enrich(items: CatalogItem[], now = Date.now()): Promise<Map<string, CatalogItem>> {
-    const stale = items.filter(it => !it.detailsFetchedAt || now - it.detailsFetchedAt > DETAILS_TTL);
+    const stale = items.filter(it =>
+      !it.detailsFetchedAt || now - it.detailsFetchedAt > DETAILS_TTL
+      // Cached before these fields existed:
+      || it.imdbId === undefined || (it.type === 'movie' && !it.usTheatrical));
     const fresh = await this.fetchDetails(stale.map(it => it.key));
     const out = new Map(items.map(it => [it.key, this.known.get(it.key) ?? it]));
     for (const it of fresh) out.set(it.key, it);
@@ -252,7 +257,11 @@ export class Catalog {
       if (!p) return null;
       try {
         const credits = p.type === 'movie' ? 'credits' : 'aggregate_credits';
-        const d = await tmdbJson(`/${p.type}/${p.id}`, { language: 'en-US', append_to_response: `keywords,${credits},watch/providers` });
+        const extra = p.type === 'movie' ? ',release_dates' : '';
+        const d = await tmdbJson(`/${p.type}/${p.id}`, {
+          language: 'en-US',
+          append_to_response: `keywords,${credits},watch/providers,external_ids${extra}`,
+        });
         const base = fromListResult({ ...d, genre_ids: (d.genres ?? []).map((g: any) => g.id) }, p.type);
         if (!base) return null;
         const kw = p.type === 'movie' ? d.keywords?.keywords : d.keywords?.results;
@@ -269,6 +278,8 @@ export class Catalog {
           cast: [...new Set<number>([...actors, ...directors, ...creators])],
           providers: (us?.flatrate ?? []).map((x: any) => x.provider_id),
           watchLink: us?.link ?? null,
+          usTheatrical: p.type === 'movie' ? usTheatricalDates(d.release_dates) : undefined,
+          imdbId: (p.type === 'movie' ? d.imdb_id : null) || d.external_ids?.imdb_id || null,
           detailsFetchedAt: Date.now(),
         };
       } catch (err: any) {

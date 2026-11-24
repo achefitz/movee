@@ -16,12 +16,17 @@ export type CatalogItem = {
   popularity: number;
   language: string;
   runtime: number | null;
-  inTheaters?: boolean;
   /** Filled by the detail fetch; undefined means "not fetched yet". */
   keywords?: number[];
   cast?: number[];
   providers?: number[]; // US flatrate provider ids
   watchLink?: string | null;
+  /** First and latest US theatrical (limited or wide) release dates; movies only. */
+  usTheatrical?: { first: string | null; latest: string | null };
+  /** IMDb id (tt…), null when TMDB has none. */
+  imdbId?: string | null;
+  /** Rotten Tomatoes Tomatometer (from Wikidata), cached; score null = none recorded. */
+  rt?: { score: number | null; url: string | null; at: number };
   detailsFetchedAt?: number;
 };
 
