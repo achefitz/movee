@@ -7,6 +7,9 @@ export type User = {
   id: string;
   username: string;
   hasSeenTutorial: boolean;
+  favoriteGenres: number[];
+  /** False until the first-run questions are answered or skipped. */
+  onboarded: boolean;
 };
 
 type AuthResult = { success: boolean; error?: string };
@@ -18,6 +21,7 @@ export type AuthContextType = {
   signup: (username: string, password: string) => Promise<AuthResult>;
   logout: () => Promise<void>;
   markTutorialSeen: () => Promise<void>;
+  completeOnboarding: (genres: number[], favoriteKeys: string[]) => Promise<AuthResult>;
 };
 
 export const MIN_PASSWORD = 8;
@@ -185,8 +189,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, [user]);
 
+  const completeOnboarding = useCallback(async (genres: number[], favoriteKeys: string[]): Promise<AuthResult> => {
+    try {
+      const { user: updated } = await apiFetch<{ user: User }>('/api/onboarding', { body: { genres, favorites: favoriteKeys } });
+      setUser(updated);
+      await cacheUser(updated);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: messageOf(e) };
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, markTutorialSeen }}>
+    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, markTutorialSeen, completeOnboarding }}>
       {children}
     </AuthContext.Provider>
   );

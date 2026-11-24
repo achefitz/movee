@@ -4,6 +4,7 @@ import { requireAuth } from '../auth/middleware';
 import { logger } from '../lib/logger';
 import { getRecsService } from '../lib/stores';
 import type { RecsService } from '../recsys/service';
+import type { User } from '../auth/store';
 import { DEFAULT_FILTERS, parseKey } from '../recsys/types';
 
 const router = Router();
@@ -35,7 +36,7 @@ const SyncBody = z.object({
   entries: z.array(z.object({ key: Key, action: ActionSchema })).max(3000),
 });
 
-function handle<T>(schema: z.ZodType<T>, fn: (body: T, svc: RecsService, userId: string) => Promise<unknown>) {
+function handle<T>(schema: z.ZodType<T>, fn: (body: T, svc: RecsService, userId: string, user: User) => Promise<unknown>) {
   return async (req: Request, res: Response) => {
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -45,7 +46,7 @@ function handle<T>(schema: z.ZodType<T>, fn: (body: T, svc: RecsService, userId:
     try {
       const svc = await getRecsService();
       res.set('Cache-Control', 'no-store');
-      res.json(await fn(parsed.data, svc, req.user!.id));
+      res.json(await fn(parsed.data, svc, req.user!.id, req.user!));
     } catch (err: any) {
       logger.error({ err: err.message, path: req.path }, 'recs request failed');
       res.status(err.message?.includes('TMDB credentials') ? 503 : 500).json({ error: 'Recommendation request failed' });
@@ -53,8 +54,8 @@ function handle<T>(schema: z.ZodType<T>, fn: (body: T, svc: RecsService, userId:
   };
 }
 
-router.post('/deck', handle(DeckBody, async (b, svc, userId) => ({
-  items: await svc.deck(userId, b.filters, b.exclude, b.limit),
+router.post('/deck', handle(DeckBody, async (b, svc, userId, user) => ({
+  items: await svc.deck(userId, b.filters, b.exclude, b.limit, user.favoriteGenres),
 })));
 
 router.post('/feedback', handle(FeedbackBody, async (b, svc, userId) => {

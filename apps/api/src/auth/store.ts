@@ -2,6 +2,8 @@ export type User = {
   id: string;
   username: string;
   hasSeenTutorial: boolean;
+  favoriteGenres: number[];
+  onboarded: boolean;
   createdAt: number;
 };
 
@@ -13,6 +15,8 @@ export interface AuthStore {
   findByUsername(username: string): Promise<UserWithHash | null>;
   findById(id: string): Promise<User | null>;
   setTutorialSeen(id: string, seen: boolean): Promise<void>;
+  /** Saves onboarding answers and marks onboarding done. */
+  completeOnboarding(id: string, favoriteGenres: number[]): Promise<void>;
 
   createSession(tokenHash: string, userId: string, expiresAt: Date): Promise<void>;
   /** The session's user, if the session exists and hasn't expired. */
@@ -27,10 +31,21 @@ export interface AuthStore {
   isFriend(userId: string, friendId: string): Promise<boolean>;
 }
 
-const pub = (u: { id: string; username: string; hasSeenTutorial: boolean; createdAt: Date | number }): User => ({
+type UserRow = {
+  id: string;
+  username: string;
+  hasSeenTutorial: boolean;
+  favoriteGenres: number[];
+  onboardedAt: Date | number | null;
+  createdAt: Date | number;
+};
+
+const pub = (u: UserRow): User => ({
   id: u.id,
   username: u.username,
   hasSeenTutorial: u.hasSeenTutorial,
+  favoriteGenres: u.favoriteGenres ?? [],
+  onboarded: u.onboardedAt != null,
   createdAt: u.createdAt instanceof Date ? u.createdAt.getTime() : u.createdAt,
 });
 
@@ -57,6 +72,9 @@ export async function createPgAuthStore(): Promise<AuthStore> {
     },
     async setTutorialSeen(id, seen) {
       await db.update(users).set({ hasSeenTutorial: seen }).where(eq(users.id, id));
+    },
+    async completeOnboarding(id, favoriteGenres) {
+      await db.update(users).set({ favoriteGenres, onboardedAt: new Date() }).where(eq(users.id, id));
     },
     async createSession(tokenHash, userId, expiresAt) {
       await db.insert(sessions).values({ tokenHash, userId, expiresAt });
@@ -105,7 +123,7 @@ export async function createPgAuthStore(): Promise<AuthStore> {
 // ------------------------------------------------------------------ in-memory (tests, or no DATABASE_URL)
 
 export function createMemoryAuthStore(): AuthStore {
-  const byId = new Map<string, UserWithHash>();
+  const byId = new Map<string, UserRow & { passwordHash: string }>();
   const sessions = new Map<string, { userId: string; expiresAt: number }>();
   const follows = new Map<string, Map<string, number>>();
 
@@ -113,17 +131,21 @@ export function createMemoryAuthStore(): AuthStore {
     async createUser(u) {
       const lower = u.username.toLowerCase();
       for (const x of byId.values()) if (x.username.toLowerCase() === lower) return null;
-      const row: UserWithHash = { id: u.id, username: u.username, passwordHash: u.passwordHash, hasSeenTutorial: false, createdAt: Date.now() };
+      const row = { id: u.id, username: u.username, passwordHash: u.passwordHash, hasSeenTutorial: false, favoriteGenres: [] as number[], onboardedAt: null, createdAt: Date.now() };
       byId.set(u.id, row);
       return pub(row);
     },
     async findByUsername(username) {
       const lower = username.toLowerCase();
-      for (const x of byId.values()) if (x.username.toLowerCase() === lower) return { ...x };
+      for (const x of byId.values()) if (x.username.toLowerCase() === lower) return { ...pub(x), passwordHash: x.passwordHash };
       return null;
     },
     async findById(id) { const u = byId.get(id); return u ? pub(u) : null; },
     async setTutorialSeen(id, seen) { const u = byId.get(id); if (u) u.hasSeenTutorial = seen; },
+    async completeOnboarding(id, favoriteGenres) {
+      const u = byId.get(id);
+      if (u) { u.favoriteGenres = favoriteGenres; u.onboardedAt = Date.now(); }
+    },
     async createSession(tokenHash, userId, expiresAt) { sessions.set(tokenHash, { userId, expiresAt: expiresAt.getTime() }); },
     async getSession(tokenHash) {
       const s = sessions.get(tokenHash);

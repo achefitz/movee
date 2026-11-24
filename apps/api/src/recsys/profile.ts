@@ -83,13 +83,16 @@ export type UserProfile = {
   seen: Set<string>;
 };
 
-const DECAY = 0.97; // per interaction; older swipes fade but never vanish
+const DECAY = 0.97;
+const FAVORITE_GENRE_PSEUDO_LIKES = 2;
+const FAVORITE_GENRE_TASTE_WEIGHT = 1.5; // per interaction; older swipes fade but never vanish
 const MAX_SIM_VECS = 40;
 
 export function buildProfile(
   userId: string,
   interactions: Interaction[],
   items: Map<string, CatalogItem>,
+  favoriteGenres: number[] = [],
 ): UserProfile {
   const hist = [...interactions].sort((a, b) => a.ts - b.ts);
   const genre: RateCounter = new Map();
@@ -135,6 +138,13 @@ export function buildProfile(
       for (const c of item.cast ?? []) castW.set(c, (castW.get(c) ?? 0) + w * 0.5);
     }
   });
+
+  // Genres picked at onboarding count as a couple of likes each, so a brand-new
+  // user's first deck already leans their way. Real swipes outweigh them quickly.
+  for (const g of favoriteGenres) {
+    for (let i = 0; i < FAVORITE_GENRE_PSEUDO_LIKES; i++) count(genre, g, 1);
+    tasteVec.set(`g:${g}`, (tasteVec.get(`g:${g}`) ?? 0) + FAVORITE_GENRE_TASTE_WEIGHT);
+  }
 
   return {
     userId,

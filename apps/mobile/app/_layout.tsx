@@ -32,10 +32,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === 'login' || segments[0] === 'signup';
+    const inOnboarding = segments[0] === 'onboarding';
 
     if (!user && !inAuthGroup) {
       router.replace('/login');
-    } else if (user && inAuthGroup) {
+    } else if (user && user.onboarded === false && !inOnboarding) {
+      router.replace('/onboarding');
+    } else if (user && user.onboarded !== false && (inAuthGroup || inOnboarding)) {
       router.replace('/(tabs)');
     }
   }, [user, isLoading, segments]);
@@ -64,6 +67,7 @@ function RootLayoutNav() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="login" options={{ headerShown: false, animation: 'fade' }} />
             <Stack.Screen name="signup" options={{ headerShown: false, animation: 'slide_from_right' }} />
+            <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
           </Stack>
         </AuthGate>
       </AppProviderWithAuth>

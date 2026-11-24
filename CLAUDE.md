@@ -58,6 +58,17 @@ Setup and commands for humans are in `README.md`.
 - `components/SwipeCard.tsx`: drag or flick to swipe, haptics, imperative `swipe()` used by the
   buttons. On web both PanResponder and mouse handlers see a gesture; `claimRelease()` makes sure
   only one handles the release.
+- Trailers autoplay (muted, looping, cropped to fill) on the top card only: `components/WebTrailer.tsx`
+  (YouTube iframe + postMessage API: fades in on "playing", hides on error) and
+  `components/NativeYoutubePlayer.tsx`. The video layer is `pointerEvents="none"` so swipes still work;
+  the card's mouse fallback ignores presses inside `[role="button"]`, so give any touchable on the
+  card `accessibilityRole="button"`. Mute preference lives in Discover (`movee.trailerMuted`).
+- `app/onboarding.tsx`: after signup (gate in `app/_layout.tsx` while `user.onboarded === false`):
+  favorite genres, then 20 popular titles to pick favorites. Server: `routes/onboarding.ts`; genres are
+  stored on the user and seed the taste profile (`buildProfile(..., favoriteGenres)`); picked titles are
+  saved as `seen_up` swipes.
+- Letterboxd: `constants/links.ts` (`letterboxd.com/tmdb/<id>`, movies only; Letterboxd has no TV).
+  Shown on movie cards and in the details sheet. No Letterboxd rating: their API needs approval.
 - `components/FilterSheet.tsx`: content type, Release (Any / New = last 2 yrs / Oldies = pre-2000),
   streamers, genres, rating, runtime, in theaters.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync

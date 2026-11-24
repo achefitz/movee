@@ -8,6 +8,8 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeYoutubePlayer } from './NativeYoutubePlayer';
+import { WebTrailer } from './WebTrailer';
+import { letterboxdUrl } from '../constants/links';
 import { MediaItem } from '../services/tmdb';
 import Colors from '../constants/colors';
 import { SVC, AMC_URL } from '../constants/streaming';
@@ -30,39 +32,21 @@ interface SwipeCardProps {
   onSwipeLeft: () => void;
   onSwipeUp: () => void;
   onPress: () => void;
-}
-
-function buildYouTubeUrl(key: string, muted: boolean) {
-  const m = muted ? '1' : '0';
-  return `https://www.youtube.com/embed/${key}?autoplay=1&mute=${m}&controls=1&loop=1&playlist=${key}&playsinline=1&rel=0&modestbranding=1&enablejsapi=1`;
-}
-
-function WebIframePlayer({ ytKey, muted }: { ytKey: string; muted: boolean }) {
-  const src = buildYouTubeUrl(ytKey, muted);
-  return React.createElement('iframe', {
-    key: src,
-    src,
-    allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen',
-    allowFullScreen: true,
-    style: {
-      position: 'absolute' as const,
-      top: 0, left: 0,
-      width: '100%', height: '100%',
-      border: 'none',
-    },
-  });
+  /** Trailer sound, shared across cards (TikTok-style: unmute once, stays unmuted). */
+  muted: boolean;
+  onToggleMute: () => void;
 }
 
 export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function SwipeCard(
-  { item, trailerKey, isTop, onSwipeRight, onSwipeLeft, onSwipeUp, onPress },
+  { item, trailerKey, isTop, onSwipeRight, onSwipeLeft, onSwipeUp, onPress, muted, onToggleMute },
   ref,
 ) {
   const position = useRef(new Animated.ValueXY()).current;
-  const [isMuted, setIsMuted] = useState(true);
   const [trailerError, setTrailerError] = useState(false);
-  const [isPlaying, setIsPlayingState] = useState(false);
+  const [stopped, setStopped] = useState(false); // user closed the trailer on this card
+  const [videoVisible, setVideoVisible] = useState(false); // fades in once actually playing
+  const [cardSize, setCardSize] = useState({ width: W, height: H * 0.7 });
   const isDragging = useRef(false);
-  const isPlayingRef = useRef(false);
   const leaving = useRef(false);
   // On web both the PanResponder and the mouse fallback below see the same gesture.
   // Whichever handles the release first stamps this so the other stands down
@@ -76,11 +60,6 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
   // The pan responder is created once; read callbacks through a ref so it never calls stale ones.
   const cb = useRef({ onSwipeRight, onSwipeLeft, onSwipeUp });
   cb.current = { onSwipeRight, onSwipeLeft, onSwipeUp };
-
-  const setIsPlaying = (val: boolean) => {
-    isPlayingRef.current = val;
-    setIsPlayingState(val);
-  };
 
   const forceSwipe = (dir: SwipeDirection) => {
     if (leaving.current) return; // ignore double taps while the card is flying off
@@ -106,19 +85,14 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
   };
 
   const handleTap = () => {
-    if (isPlayingRef.current || leaving.current) return;
-    if (isTop && trailerKey && !trailerError) {
-      setIsPlaying(true);
-    } else {
-      onPress();
-    }
+    if (leaving.current) return;
+    onPress();
   };
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !isPlayingRef.current,
-      onMoveShouldSetPanResponder: (_, g) =>
-        !isPlayingRef.current && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
         isDragging.current = false;
@@ -156,13 +130,15 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
 
   const webHandlers = Platform.OS === 'web' ? {
     onMouseDown: (e: any) => {
-      if (isPlayingRef.current) return;
+      // Presses on the card's own buttons (mute, Letterboxd, streaming chips…) are not
+      // card taps or drags. Phones also send these mouse events after every touch.
+      if (e.target?.closest?.('[role="button"]')) return;
       isDragging.current = false;
       webDragState.current = { active: true, startX: e.clientX, startY: e.clientY };
       e.preventDefault?.();
     },
     onMouseMove: (e: any) => {
-      if (!webDragState.current.active || isPlayingRef.current) return;
+      if (!webDragState.current.active) return;
       const dx = e.clientX - webDragState.current.startX;
       const dy = e.clientY - webDragState.current.startY;
       if (Math.abs(dx) > 6 || Math.abs(dy) > 6) isDragging.current = true;
@@ -215,9 +191,9 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
   const nopeOpacity = position.x.interpolate({ inputRange: [-W / 4, 0], outputRange: [1, 0], extrapolate: 'clamp' });
   const watchedOpacity = position.y.interpolate({ inputRange: [-H / 5, 0], outputRange: [1, 0], extrapolate: 'clamp' });
 
-  const toggleMute = () => setIsMuted(prev => !prev);
-
-  const canPlay = isTop && !!trailerKey && !trailerError;
+  // Autoplay the top card's trailer; the poster stays until the video is really playing.
+  const playTrailer = isTop && !!trailerKey && !trailerError && !stopped;
+  const lbUrl = letterboxdUrl(item);
 
   const streamingBadges = (item.streamingIds || [])
     .filter(id => SVC[id])
@@ -233,24 +209,32 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
       {...panResponder.panHandlers}
       {...webHandlers}
     >
-      <View style={styles.cardInner}>
-        {isPlaying ? (
-          Platform.OS === 'web' ? (
-            <View style={StyleSheet.absoluteFill}>
-              <WebIframePlayer ytKey={trailerKey!} muted={isMuted} />
-            </View>
-          ) : (
-            <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <View
+        style={styles.cardInner}
+        onLayout={e => setCardSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
+      >
+        <Image source={item.posterUrl} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+
+        {playTrailer && (
+          <View style={[StyleSheet.absoluteFill, styles.videoLayer, { opacity: videoVisible ? 1 : 0 }]} pointerEvents="none">
+            {Platform.OS === 'web' ? (
+              <WebTrailer
+                ytKey={trailerKey!}
+                muted={muted}
+                onPlaying={() => setVideoVisible(true)}
+                onError={() => { setTrailerError(true); setVideoVisible(false); }}
+              />
+            ) : (
               <NativeYoutubePlayer
                 videoId={trailerKey!}
-                isMuted={isMuted}
-                onEnded={() => setIsPlaying(false)}
-                onError={() => { setTrailerError(true); setIsPlaying(false); }}
+                isMuted={muted}
+                width={cardSize.width}
+                height={cardSize.height}
+                onPlaying={() => setVideoVisible(true)}
+                onError={() => { setTrailerError(true); setVideoVisible(false); }}
               />
-            </View>
-          )
-        ) : (
-          <Image source={item.posterUrl} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+            )}
+          </View>
         )}
 
         <LinearGradient
@@ -280,6 +264,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
           <View style={styles.metaRow}>
             <Ionicons name="star" size={14} color={Colors.accent} />
             <Text style={styles.rating}>{item.rating.toFixed(1)}</Text>
+            <Text style={styles.ratingSource}>TMDB</Text>
             {item.genreNames.slice(0, 2).map(g => (
               <View key={g} style={styles.genreTag}>
                 <Text style={styles.genreText}>{g}</Text>
@@ -287,13 +272,30 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
             ))}
           </View>
 
-          {(streamingBadges.length > 0 || item.inTheaters) && (
+          {(streamingBadges.length > 0 || item.inTheaters || lbUrl) && (
             <View style={styles.streamingRow}>
+              {lbUrl && (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  style={styles.letterboxdBadge}
+                  onPress={() => openLink(lbUrl)}
+                  activeOpacity={0.8}
+                  accessibilityLabel={`Open ${item.title} on Letterboxd`}
+                >
+                  <View style={styles.lbDots}>
+                    <View style={[styles.lbDot, { backgroundColor: '#FF8000' }]} />
+                    <View style={[styles.lbDot, { backgroundColor: '#00E054' }]} />
+                    <View style={[styles.lbDot, { backgroundColor: '#40BCF4' }]} />
+                  </View>
+                  <Text style={styles.letterboxdText}>Letterboxd</Text>
+                </TouchableOpacity>
+              )}
               {streamingBadges.map(id => {
                 const svc = SVC[id];
                 return (
                   <TouchableOpacity
                     key={id}
+                    accessibilityRole="button"
                     style={[styles.streamingBadge, { backgroundColor: svc.color }]}
                     onPress={() => openLink(svc.url)}
                     activeOpacity={0.8}
@@ -304,6 +306,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
               })}
               {item.inTheaters && (
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.theaterBadge}
                   onPress={() => openLink(AMC_URL)}
                   activeOpacity={0.8}
@@ -316,24 +319,32 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
           )}
         </LinearGradient>
 
-        {canPlay && !isPlaying && (
-          <TouchableOpacity
-            style={styles.playBtn}
-            onPress={() => setIsPlaying(true)}
-            activeOpacity={0.8}
-          >
+        {isTop && !!trailerKey && !trailerError && stopped && (
+          <TouchableOpacity style={styles.playBtn} onPress={() => setStopped(false)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Play trailer">
             <View style={styles.playBtnInner}>
               <Ionicons name="play" size={26} color="#fff" style={{ marginLeft: 4 }} />
             </View>
           </TouchableOpacity>
         )}
 
-        {isPlaying && (
+        {playTrailer && videoVisible && (
           <View style={styles.playerControls}>
-            <TouchableOpacity style={styles.controlBtn} onPress={toggleMute} activeOpacity={0.8}>
-              <Ionicons name={isMuted ? 'volume-mute' : 'volume-high'} size={18} color="#fff" />
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.controlBtn}
+              onPress={onToggleMute}
+              activeOpacity={0.8}
+              accessibilityLabel={muted ? 'Unmute trailer' : 'Mute trailer'}
+            >
+              <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={18} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.controlBtn} onPress={() => setIsPlaying(false)} activeOpacity={0.8}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.controlBtn}
+              onPress={() => { setStopped(true); setVideoVisible(false); }}
+              activeOpacity={0.8}
+              accessibilityLabel="Stop trailer"
+            >
               <Ionicons name="close" size={18} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -401,6 +412,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
   },
+  videoLayer: {
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  ratingSource: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: -2,
+    marginRight: 4,
+  },
+  letterboxdBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#14181C',
+    borderWidth: 1,
+    borderColor: '#2C3440',
+  },
+  lbDots: { flexDirection: 'row', gap: 2 },
+  lbDot: { width: 7, height: 7, borderRadius: 4 },
+  letterboxdText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   reasonChip: {
     flexDirection: 'row',
     alignItems: 'center',

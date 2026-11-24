@@ -3,6 +3,7 @@ import { requireAuth } from "../auth/middleware";
 import authRouter from "./auth";
 import friendsRouter from "./friends";
 import healthRouter from "./health";
+import onboardingRouter from "./onboarding";
 import recsRouter from "./recs";
 import tmdbRouter from "./tmdb";
 import viewerTypeRouter from "./viewer-type";
@@ -17,5 +18,6 @@ router.use("/tmdb", requireAuth, tmdbRouter);
 router.use("/viewer-type", requireAuth, viewerTypeRouter);
 router.use("/recs", recsRouter);
 router.use("/friends", friendsRouter);
+router.use("/onboarding", onboardingRouter);
 
 export default router;

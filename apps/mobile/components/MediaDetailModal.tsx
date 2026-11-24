@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MediaItem, fetchMediaDetails, MediaDetails } from '../services/tmdb';
 import Colors from '../constants/colors';
 import { SVC, AMC_URL } from '../constants/streaming';
+import { letterboxdUrl } from '../constants/links';
 import { shareItem } from '../utils/share';
 
 interface Props {
@@ -46,6 +47,7 @@ export function MediaDetailModal({ visible, item, onClose, onLike, onSkip, onWat
 
   const streamingBadges = (item.streamingIds || []).filter(id => SVC[id]).slice(0, 4);
   const openLink = (url: string) => Linking.openURL(url).catch(() => {});
+  const lbUrl = letterboxdUrl(item);
 
   const hasDetails = details && (details.director || details.cast.length > 0 || details.runtime);
 
@@ -86,10 +88,28 @@ export function MediaDetailModal({ visible, item, onClose, onLike, onSkip, onWat
               <View style={styles.ratingRow}>
                 <Ionicons name="star" size={14} color={Colors.accent} />
                 <Text style={styles.rating}>{item.rating.toFixed(1)}</Text>
+                <Text style={styles.ratingSource}>on TMDB</Text>
               </View>
             </View>
 
             <Text style={styles.title}>{item.title}</Text>
+
+            {lbUrl && (
+              <TouchableOpacity
+                style={styles.letterboxdBtn}
+                onPress={() => openLink(lbUrl)}
+                activeOpacity={0.85}
+                accessibilityLabel={`Open ${item.title} on Letterboxd`}
+              >
+                <View style={styles.lbDots}>
+                  <View style={[styles.lbDot, { backgroundColor: '#FF8000' }]} />
+                  <View style={[styles.lbDot, { backgroundColor: '#00E054' }]} />
+                  <View style={[styles.lbDot, { backgroundColor: '#40BCF4' }]} />
+                </View>
+                <Text style={styles.letterboxdText}>Reviews & rating on Letterboxd</Text>
+                <Ionicons name="open-outline" size={16} color="#9AB" />
+              </TouchableOpacity>
+            )}
 
             {item.genreNames.length > 0 && (
               <View style={styles.genres}>
@@ -259,6 +279,27 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 13,
   },
+  ratingSource: {
+    color: Colors.textMuted,
+    fontSize: 12,
+  },
+  letterboxdBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: '#14181C',
+    borderWidth: 1,
+    borderColor: '#2C3440',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  lbDots: { flexDirection: 'row', gap: 3 },
+  lbDot: { width: 9, height: 9, borderRadius: 5 },
+  letterboxdText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -6,11 +6,11 @@ import { Catalog } from './catalog';
 import { FEATURE_VERSION, featureIndex } from './features';
 import { matchesFilters } from './filters';
 import { generateCandidates, rerank, scoreCandidates, type Candidate, type Scored } from './pipeline';
-import { buildProfile, noveltyTest } from './profile';
+import { buildProfile, canonicalGenres, noveltyTest } from './profile';
 import { MIN_TRAINING_ROWS, trainRanker, type EnsembleModel, type Ranker, type TrainReport, type TrainingRow } from './ranker';
 import { buildGlobalStats, emptyStats, type GlobalStats } from './stats';
 import type { RecsStore } from './store';
-import { yearOf, type Action, type CatalogItem, type DeckFilters } from './types';
+import { DEFAULT_FILTERS, yearOf, type Action, type CatalogItem, type DeckFilters } from './types';
 
 type Log = { info: (o: object, m: string) => void; warn: (o: object, m: string) => void; error: (o: object, m: string) => void };
 
@@ -124,12 +124,12 @@ export class RecsService {
     return this.statsBuilding;
   }
 
-  async deck(userId: string, f: DeckFilters, exclude: string[], limit: number): Promise<DeckItem[]> {
+  async deck(userId: string, f: DeckFilters, exclude: string[], limit: number, favoriteGenres: number[] = []): Promise<DeckItem[]> {
     const now = Date.now();
     void this.refreshStats(); // stale-while-revalidate
     const history = await this.store.getUserInteractions(userId);
     const histItems = await this.catalog.getItems(history.slice(-300).map(h => h.itemKey));
-    const profile = buildProfile(userId, history, histItems);
+    const profile = buildProfile(userId, history, histItems, favoriteGenres);
     for (const k of exclude) profile.seen.add(k);
 
     const [pools, i2i] = await Promise.all([
@@ -196,6 +196,41 @@ export class RecsService {
     else if (s.cand.sources.popular && s.cand.sources.popular.rank < 15) reason = 'Trending now';
 
     return { ...toMediaItem(it), impressionId: randomUUID(), reason };
+  }
+
+  /**
+   * Popular titles for the "pick your favorites" onboarding step: round-robin across the
+   * chosen genres so one genre doesn't fill the grid, topped up from overall popularity.
+   */
+  async onboardingTitles(genres: number[], limit = 20): Promise<Array<ReturnType<typeof toMediaItem>>> {
+    const picked: CatalogItem[] = [];
+    const seen = new Set<string>();
+    const take = (it: CatalogItem | undefined) => {
+      if (!it || seen.has(it.key) || !it.posterPath || picked.length >= limit) return;
+      seen.add(it.key);
+      picked.push(it);
+    };
+    const byKeys = async (keys: string[]) => {
+      const m = await this.catalog.getItems(keys);
+      return keys.map(k => m.get(k)).filter((x): x is CatalogItem => !!x);
+    };
+    if (genres.length) {
+      const pool = await byKeys((await this.catalog.getPools({ ...DEFAULT_FILTERS, genres })).popular);
+      const perGenre = genres.map(g => pool.filter(it => canonicalGenres(it).includes(g)));
+      for (let i = 0; picked.length < limit && perGenre.some(l => i < l.length); i++) {
+        for (const l of perGenre) take(l[i]);
+      }
+    }
+    for (const it of await byKeys((await this.catalog.getPools(DEFAULT_FILTERS)).popular)) take(it);
+    return picked.map(toMediaItem);
+  }
+
+  /** Titles chosen at onboarding are recorded as watched-and-loved. */
+  async recordFavorites(userId: string, keys: string[]) {
+    const now = Date.now();
+    for (let i = 0; i < keys.length; i++) {
+      await this.store.upsertInteraction({ userId, itemKey: keys[i], action: 'seen_up', ts: now - keys.length + i }, null);
+    }
   }
 
   /** A user's recent likes and watches (newest first), for friends' activity feeds. */

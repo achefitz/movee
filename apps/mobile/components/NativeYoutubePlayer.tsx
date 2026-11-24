@@ -1,39 +1,45 @@
 import React from 'react';
-import { StyleSheet, Dimensions } from 'react-native';
+import { View } from 'react-native';
 import YoutubeIframe from 'react-native-youtube-iframe';
-
-const { width: W, height: H } = Dimensions.get('window');
 
 interface Props {
   videoId: string;
   isMuted: boolean;
-  onEnded: () => void;
+  /** Size of the card; the 16:9 video is scaled to cover it and the sides are cropped. */
+  width: number;
+  height: number;
+  onPlaying: () => void;
   onError: () => void;
 }
 
-export function NativeYoutubePlayer({ videoId, isMuted, onEnded, onError }: Props) {
+export function NativeYoutubePlayer({ videoId, isMuted, width, height, onPlaying, onError }: Props) {
+  const videoW = Math.max(width, Math.ceil(height * 16 / 9));
+  const videoH = Math.max(height, Math.ceil(videoW * 9 / 16));
   return (
-    <YoutubeIframe
-      videoId={videoId}
-      play
-      mute={isMuted}
-      height={H}
-      width={W}
-      onChangeState={(state: string) => { if (state === 'ended') onEnded(); }}
-      onError={onError}
-      initialPlayerParams={{
-        preventFullScreen: true,
-        loop: true,
-        controls: false,
-        modestbranding: true,
-        rel: false,
-      }}
-      webViewStyle={StyleSheet.absoluteFill}
-      webViewProps={{
-        allowsInlineMediaPlayback: true,
-        mediaPlaybackRequiresUserAction: false,
-        androidLayerType: 'hardware',
-      }}
-    />
+    <View style={{ position: 'absolute', top: (height - videoH) / 2, left: (width - videoW) / 2, width: videoW, height: videoH }}>
+      <YoutubeIframe
+        videoId={videoId}
+        play
+        mute={isMuted}
+        height={videoH}
+        width={videoW}
+        onChangeState={(state: string) => { if (state === 'playing') onPlaying(); }}
+        onError={onError}
+        initialPlayerParams={{
+          preventFullScreen: true,
+          loop: true,
+          controls: false,
+          modestbranding: true,
+          rel: false,
+          iv_load_policy: 3,
+        }}
+        webViewProps={{
+          allowsInlineMediaPlayback: true,
+          mediaPlaybackRequiresUserAction: false,
+          androidLayerType: 'hardware',
+          scrollEnabled: false,
+        }}
+      />
+    </View>
   );
 }

@@ -1,4 +1,4 @@
-import { boolean, index, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(), // uuid
@@ -6,6 +6,10 @@ export const users = pgTable("users", {
   usernameLower: text("username_lower").notNull().unique(), // uniqueness is case-insensitive
   passwordHash: text("password_hash").notNull(),
   hasSeenTutorial: boolean("has_seen_tutorial").notNull().default(false),
+  /** TMDB movie genre ids picked during onboarding; seed the recommender's taste profile. */
+  favoriteGenres: integer("favorite_genres").array().notNull().default([]),
+  /** Set once the user finishes (or skips) onboarding. */
+  onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

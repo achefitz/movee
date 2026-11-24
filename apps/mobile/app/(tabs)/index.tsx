@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   StyleSheet, Text, View, TouchableOpacity,
   ActivityIndicator, Platform, Modal,
@@ -20,6 +21,7 @@ import Colors from '@/constants/colors';
 
 /** Fetch the next page once this many cards are left, so the deck never runs dry mid-swipe. */
 const REFILL_AT = 6;
+const MUTE_KEY = 'movee.trailerMuted';
 const FIRST_PAGE = 15;
 const NEXT_PAGE = 20;
 
@@ -159,6 +161,17 @@ export default function DiscoverScreen() {
   const [trailerKeys, setTrailerKeys] = useState<Record<string, string | null>>({});
   const [pendingRatingItem, setPendingRatingItem] = useState<MediaItem | null>(null);
   const [lastSwiped, setLastSwiped] = useState<MediaItem | null>(null);
+  // Trailers autoplay muted; unmuting once keeps sound on for the next cards (remembered).
+  const [trailerMuted, setTrailerMuted] = useState(true);
+  useEffect(() => {
+    AsyncStorage.getItem(MUTE_KEY).then(v => { if (v === '0') setTrailerMuted(false); }).catch(() => {});
+  }, []);
+  const toggleTrailerMute = useCallback(() => {
+    setTrailerMuted(prev => {
+      AsyncStorage.setItem(MUTE_KEY, prev ? '0' : '1').catch(() => {});
+      return !prev;
+    });
+  }, []);
 
   const deckRef = useRef<MediaItem[]>([]);
   deckRef.current = deck;
@@ -362,6 +375,8 @@ export default function DiscoverScreen() {
                   ref={topCardRef}
                   item={item}
                   trailerKey={trailerKeys[k]}
+                  muted={trailerMuted}
+                  onToggleMute={toggleTrailerMute}
                   isTop
                   onSwipeLeft={() => handleSwipe('left')}
                   onSwipeRight={() => handleSwipe('right')}

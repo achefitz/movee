@@ -253,6 +253,32 @@ try {
   assert.ok(limited > 0, 'no rate limiting on repeated failures');
   ok(`password guessing is rate-limited (${limited}/10 attempts refused)`);
 
+  // 11. Onboarding
+  const O = `${root}/onboarding`;
+  const newbie = await tokenFor('newbie');
+  assert.equal((await call('GET', `${A}/me`, undefined, newbie)).body.user.onboarded, false);
+  const titles = await call('GET', `${O}/titles?genres=27,35`, undefined, newbie);
+  assert.equal(titles.status, 200);
+  assert.equal(titles.body.items.length, 20);
+  const genreHits = titles.body.items.filter((i: any) => i.genres.includes(27) || i.genres.includes(35)).length;
+  assert.ok(genreHits >= 15, `only ${genreHits}/20 onboarding titles match the chosen genres`);
+  ok(`onboarding grid: 20 popular titles, ${genreHits} in the chosen genres`);
+  const favs = titles.body.items.slice(0, 3).map((i: any) => i.key);
+  const done = await call('POST', O, { genres: [27], favorites: favs }, newbie);
+  assert.equal(done.body.user.onboarded, true);
+  assert.deepEqual(done.body.user.favoriteGenres, [27]);
+  assert.equal((await call('GET', `${A}/me`, undefined, newbie)).body.user.onboarded, true);
+  ok('onboarding answers saved on the account');
+  const nd = (await post('/deck', { userId: 'newbie', limit: 20 })).body.items as any[];
+  assert.ok(nd.every(i => !favs.includes(i.key)), 'picked favorites shown again in the deck');
+  const horrorShare = nd.filter(i => byKey.get(i.key)!.genres.includes(27)).length / nd.length;
+  const coldShare = d1.filter(i => byKey.get(i.key)!.genres.includes(27)).length / d1.length;
+  console.log(`    horror share in first deck: no onboarding ${(coldShare * 100).toFixed(0)}% → picked Horror ${(horrorShare * 100).toFixed(0)}%`);
+  assert.ok(horrorShare > coldShare, 'first deck does not lean towards the picked genre');
+  ok('first deck leans towards picked genres and skips picked favorites');
+  assert.equal((await call('POST', O, { genres: [], favorites: [] }, await tokenFor('skipper'))).body.user.onboarded, true);
+  ok('skipping onboarding marks it done');
+
   // 10. Friends
   const F = `${root}/friends`;
   const aliceT = await tokenFor('alice');
