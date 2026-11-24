@@ -38,6 +38,11 @@ your computer's LAN address:
 EXPO_PUBLIC_API_URL=http://192.168.1.20:8080
 ```
 
+## Hosting
+
+`render.yaml` deploys the API and the web app to Render; the database is Neon. Setup steps are in
+`docs/HANDOFF.md` (section 8). Every push to `main` redeploys.
+
 ## Layout
 
 | Path | What |

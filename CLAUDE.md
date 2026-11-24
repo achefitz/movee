@@ -19,6 +19,9 @@ open items) is `docs/HANDOFF.md`.
 - `pnpm test`: `apps/api/scripts/recsys-e2e.ts`; the whole API (accounts, friends, recommender) against a
   fake TMDB with in-memory stores.
 - `pnpm --filter @movee/api run recsys:simulate`: offline simulation with synthetic users.
+- Hosting: `render.yaml` (Render Blueprint: `movee-api` web service + `movee-web` static site), Neon
+  Postgres via `DATABASE_URL`. The API build runs `db:push`, so schema changes deploy with the code.
+  Pushing to `main` redeploys both.
 - `pnpm db:users` (newest sign-ups) / `pnpm db:studio` (Drizzle Studio in the browser).
 - `pnpm db:push`: apply schema changes (needs `DATABASE_URL`). Without `DATABASE_URL` the API uses
   an in-memory store.

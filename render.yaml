@@ -1,0 +1,50 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Two services from this repo. The database is Neon (free Postgres), connected via DATABASE_URL.
+# Setup steps: docs/HANDOFF.md → "Hosting (Render + Neon)".
+services:
+  # Express API (accounts, follows, recommender, TMDB proxy)
+  - type: web
+    name: movee-api
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    # Installs, builds the bundle, then creates/updates the database tables (drizzle push).
+    buildCommand: >-
+      npx --yes pnpm@10.28.0 install --frozen-lockfile &&
+      npx --yes pnpm@10.28.0 --filter @movee/api run build &&
+      npx --yes pnpm@10.28.0 db:push
+    startCommand: node --enable-source-maps apps/api/dist/index.mjs
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: TMDB_READ_ACCESS_TOKEN
+        sync: false # you paste it in Render
+      - key: DATABASE_URL
+        sync: false # the Neon connection string
+      - key: ANTHROPIC_API_KEY
+        sync: false # optional (profile "viewer type" label); leave empty to skip
+
+  # The app, built for the web (Expo export) and served as static files.
+  - type: web
+    name: movee-web
+    runtime: static
+    branch: main
+    buildCommand: >-
+      npx --yes pnpm@10.28.0 install --frozen-lockfile &&
+      npx --yes pnpm@10.28.0 --filter @movee/mobile run build:web
+    staticPublishPath: apps/mobile/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: EXPO_PUBLIC_API_URL
+        sync: false # the movee-api URL, e.g. https://movee-api.onrender.com

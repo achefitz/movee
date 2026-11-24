@@ -4,7 +4,7 @@ Everything someone (or a fresh Claude session) needs to pick up Movee: what it i
 lives, how it works, how to run it, and what's left. Code-level conventions for Claude are in
 `CLAUDE.md`; setup steps for humans are in `README.md`. This file links them together.
 
-_Last updated: 2026-11-24. Repo: https://github.com/achefitz/movee (private), branch `main`._
+_Last updated: 2026-11-24 (hosting added). Repo: https://github.com/achefitz/movee (private), branch `main`._
 
 ---
 
@@ -169,11 +169,33 @@ Today it only runs on the Mac, so only devices on your home Wi-Fi can reach it. 
 
 1. **Same Wi-Fi:** friends at your place open `http://192.168.1.153:8081`.
 2. **Temporary public link from the Mac (Cloudflare Tunnel, free):** `brew install cloudflared`, then run `cloudflared tunnel --url http://localhost:8080` (note the API URL it prints), put that URL in `apps/mobile/.env` as `EXPO_PUBLIC_API_URL`, restart Expo, and run `cloudflared tunnel --url http://localhost:8081` for the app link to share. The links change every run, the Mac must stay awake, and it's the dev server (slow first load). Fine for a few friends for an evening.
-3. **Proper hosting (recommended for ongoing testing):**
-   - Database: a managed Postgres (e.g. Neon or Supabase free tier), then `pnpm db:push` against it.
-   - API: deploy `apps/api` (e.g. Render, Railway or Fly.io): build `pnpm --filter @movee/api run build`, start `node apps/api/dist/index.mjs`, env `TMDB_READ_ACCESS_TOKEN`, `DATABASE_URL`, `PORT`, `TRUST_PROXY=1`.
-   - Web app: `EXPO_PUBLIC_API_URL=https://<api-host> pnpm --filter @movee/mobile run build:web` and host `apps/mobile/dist` on Netlify, Vercel or Cloudflare Pages. Friends open a normal URL on their phones and can "Add to Home Screen".
-   - Native app later: EAS Build → TestFlight (needs an Apple Developer account) / an Android APK.
+3. **Hosting (set up): Render + Neon.** `render.yaml` at the repo root is a Render Blueprint with
+   two services: `movee-api` (builds the API, runs `db:push` against Neon, starts
+   `apps/api/dist/index.mjs`; health check `/api/healthz`) and `movee-web` (static Expo web export,
+   all paths rewritten to `index.html`). Both deploy automatically on every push to `main`.
+
+   One-time setup:
+   1. **Neon** (neon.tech, sign in with GitHub): new project `movee`, region AWS US West 2 (Oregon,
+      next to Render's Oregon region). From **Connect**, turn **Connection pooling off** and copy the
+      connection string (`postgresql://…neon.tech/neondb?sslmode=require…`).
+   2. **Render** (render.com, sign in with GitHub): **New → Blueprint**, give Render access to
+      `achefitz/movee`, pick it. Render reads `render.yaml` and asks for:
+      - `TMDB_READ_ACCESS_TOKEN`: same token as in `~/movee/.env`
+      - `DATABASE_URL`: the Neon string
+      - `ANTHROPIC_API_KEY`: optional, leave empty
+      - `EXPO_PUBLIC_API_URL`: `https://movee-api.onrender.com` (if Render gives the API a different
+        URL, set this to it on `movee-web` → Environment and redeploy `movee-web`)
+   3. **Apply.** First deploy takes ~5 minutes. Share the `movee-web` URL with friends.
+
+   Free tier notes: the API sleeps after 15 minutes without traffic, so the first request after a
+   break takes about a minute (Render's Starter plan, ~$7/mo, keeps it awake). Neon's free tier has
+   0.5 GB of storage, which is plenty for now. Memory: the API uses ~260 MB with IMDb ratings
+   loaded (free instance: 512 MB).
+
+   Seeing sign-ups on the hosted database: `DATABASE_URL='<neon string>' pnpm db:users` or
+   `DATABASE_URL='<neon string>' pnpm db:studio` from `~/movee`, or Neon's own SQL editor / tables view.
+
+   Native app later: EAS Build → TestFlight (needs an Apple Developer account) / an Android APK.
 
 Before inviting strangers: set real hosting secrets, review the IMDb licence point above, and consider password reset (needs email on accounts).
 
@@ -199,7 +221,7 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 
 ## 11. Known limitations / next steps
 
-- **Hosting** (section 8) so friends can test without your Mac.
+- **Hosting**: `render.yaml` + Neon are set up (section 8); consider Starter plan to avoid cold starts.
 - **Password reset / email**: accounts have no email yet.
 - **Expo Go** may not support SDK 54 any more; the web version works on phones. Upgrade Expo or build a development client with Xcode.
 - **Login rate limits are in memory** (per server process); fine for one server.
