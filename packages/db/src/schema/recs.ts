@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, real, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, real, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 /** TMDB metadata cache (one row per movie/show), shared by every recommender stage. */
 export const recsMediaItems = pgTable("recs_media_items", {
@@ -16,6 +16,8 @@ export const recsInteractions = pgTable(
     itemKey: text("item_key").notNull(),
     action: text("action").notNull(), // like | skip | seen | seen_up | seen_meh | seen_down
     impressionId: text("impression_id"),
+    // Removed from the user's Watchlist / Watched list. The swipe still counts for recommendations.
+    hidden: boolean("hidden").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [

@@ -69,6 +69,22 @@ router.post('/undo', handle(UndoBody, async (b, svc, userId) => {
   return { ok: true };
 }));
 
+router.post('/hide', handle(UndoBody, async (b, svc, userId) => {
+  await svc.hide(userId, b.key);
+  return { ok: true };
+}));
+
+router.get('/library', async (req, res) => {
+  try {
+    const svc = await getRecsService();
+    res.set('Cache-Control', 'no-store');
+    res.json(await svc.library(req.user!.id));
+  } catch (err: any) {
+    logger.error({ err: err.message }, 'library request failed');
+    res.status(500).json({ error: 'Could not load your lists' });
+  }
+});
+
 router.post('/sync', handle(SyncBody, (b, svc, userId) => svc.sync(userId, b.entries)));
 
 router.get('/status', async (_req, res) => {

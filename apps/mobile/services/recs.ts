@@ -40,7 +40,8 @@ export async function fetchDeck(
 
 type Pending =
   | { kind: 'feedback'; key: string; action: SwipeAction; impressionId?: string | null }
-  | { kind: 'undo'; key: string };
+  | { kind: 'undo'; key: string }
+  | { kind: 'hide'; key: string };
 
 const QUEUE_KEY = 'movee.recsQueue';
 let queue: Pending[] = [];
@@ -68,6 +69,8 @@ async function flush() {
       try {
         if (next.kind === 'feedback') {
           await apiFetch('/api/recs/feedback', { body: { key: next.key, action: next.action, impressionId: next.impressionId ?? null } });
+        } else if (next.kind === 'hide') {
+          await apiFetch('/api/recs/hide', { body: { key: next.key } });
         } else {
           await apiFetch('/api/recs/undo', { body: { key: next.key } });
         }
@@ -103,6 +106,32 @@ export function sendFeedback(item: MediaItem, action: SwipeAction) {
 
 export function sendUndo(item: MediaItem) {
   enqueue({ kind: 'undo', key: keyOf(item) });
+}
+
+/** Removed from the Watchlist / Watched list: hidden on every device, still counts for recommendations. */
+export function sendHide(item: Pick<MediaItem, 'type' | 'id'>) {
+  enqueue({ kind: 'hide', key: keyOf(item) });
+}
+
+export type Library = {
+  liked: MediaItem[];
+  watched: Array<MediaItem & { myRating: 'up' | 'meh' | 'down' | null }>;
+  /** Every title the server has a swipe for (including removed ones). */
+  known: string[];
+};
+
+/**
+ * The account's saved and watched lists as the server has them, plus the keys of
+ * changes still waiting in this device's queue (so they aren't overwritten).
+ */
+export async function fetchLibrary(): Promise<{ lib: Library; pending: Set<string>; pendingHides: Set<string> }> {
+  const lib = await apiFetch<Library>('/api/recs/library');
+  await ready;
+  return {
+    lib,
+    pending: new Set(queue.map(p => p.key)),
+    pendingHides: new Set(queue.filter(p => p.kind === 'hide').map(p => p.key)),
+  };
 }
 
 /** Called on logout so one account's queued swipes are never sent as another's. */

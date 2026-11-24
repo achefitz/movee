@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MediaItem } from '../services/tmdb';
+import { fetchLibrary, keyOf, sendHide } from '../services/recs';
 
 export type Era = 'all' | 'new' | 'classic';
 
@@ -130,8 +131,57 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       const merged: Filters = { ...defaultFilters, ...storedFilters };
       setFiltersState(merged);
       setIsLoaded(true);
+      if (username) await hydrateFromServer(saved, watchedList, ratings, swiped);
     })();
   }, [username]);
+
+  /**
+   * The server is the source of truth for the Watchlist and Watched lists, so they follow the
+   * account to any phone or browser. Local entries the server doesn't know yet (queued offline,
+   * or from before server accounts) are kept; they're on their way up.
+   */
+  async function hydrateFromServer(
+    localSaved: MediaItem[],
+    localWatched: MediaItem[],
+    localRatings: Record<number, 'up' | 'meh' | 'down'>,
+    localSwiped: number[],
+  ) {
+    let res: Awaited<ReturnType<typeof fetchLibrary>>;
+    try { res = await fetchLibrary(); } catch { return; } // offline: keep what's on the device
+    const { lib, pending, pendingHides } = res;
+    const known = new Set(lib.known);
+    const keepLocal = (i: MediaItem) => !known.has(keyOf(i)) || (pending.has(keyOf(i)) && !pendingHides.has(keyOf(i)));
+    const watchedLocal = localWatched.filter(keepLocal);
+    const watchedLocalIds = new Set(watchedLocal.map(i => i.id));
+    const savedLocal = localSaved.filter(i => keepLocal(i) && !watchedLocalIds.has(i.id));
+    const dedupe = (list: MediaItem[]) => {
+      const seen = new Set<string>();
+      return list.filter(i => !seen.has(keyOf(i)) && !!seen.add(keyOf(i)));
+    };
+    // Lists are stored oldest first; the server sends newest first.
+    const serverSaved = lib.liked.filter(i => !pendingHides.has(keyOf(i)) && !watchedLocalIds.has(i.id)).reverse();
+    const serverWatched = lib.watched.filter(i => !pendingHides.has(keyOf(i))).reverse();
+    const nextWatched = dedupe([...serverWatched.map(({ myRating, ...i }) => i as MediaItem), ...watchedLocal]);
+    const nextWatchedIds = new Set(nextWatched.map(i => i.id));
+    const nextSaved = dedupe([...serverSaved, ...savedLocal]).filter(i => !nextWatchedIds.has(i.id));
+    const nextRatings: Record<number, 'up' | 'meh' | 'down'> = {};
+    for (const w of serverWatched) if (w.myRating) nextRatings[w.id] = w.myRating;
+    for (const w of watchedLocal) if (localRatings[w.id]) nextRatings[w.id] = localRatings[w.id];
+    const nextSwiped = new Set([...localSwiped, ...lib.known.map(k => Number(k.split(':')[1]))]);
+
+    setSavedItems(nextSaved);
+    setLikedIds(new Set(nextSaved.map(i => i.id)));
+    setWatchedItems(nextWatched);
+    setWatchedIds(nextWatchedIds);
+    setWatchedRatings(nextRatings);
+    setSwipedIds(nextSwiped);
+    save(userKey(username, 'savedItems'), nextSaved);
+    save(userKey(username, 'likedIds'), nextSaved.map(i => i.id));
+    save(userKey(username, 'watchedItems'), nextWatched);
+    save(userKey(username, 'watchedIds'), Array.from(nextWatchedIds));
+    save(userKey(username, 'watchedRatings'), nextRatings);
+    save(userKey(username, 'swipedIds'), Array.from(nextSwiped));
+  }
 
   const setProfileName = useCallback(async (name: string) => {
     setProfileNameState(name);
@@ -282,6 +332,8 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
   }, [username]);
 
   const removeFromSaved = useCallback(async (id: number) => {
+    const item = savedItems.find(i => i.id === id);
+    if (item) sendHide(item);
     setSavedItems(prev => {
       const next = prev.filter(i => i.id !== id);
       save(userKey(username, 'savedItems'), next);
@@ -293,9 +345,11 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       save(userKey(username, 'likedIds'), Array.from(next));
       return next;
     });
-  }, [username]);
+  }, [username, savedItems]);
 
   const removeFromWatched = useCallback(async (id: number) => {
+    const item = watchedItems.find(i => i.id === id);
+    if (item) sendHide(item);
     setWatchedItems(prev => {
       const next = prev.filter(i => i.id !== id);
       save(userKey(username, 'watchedItems'), next);
@@ -314,9 +368,10 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       save(userKey(username, 'watchedRatings'), next);
       return next;
     });
-  }, [username]);
+  }, [username, watchedItems]);
 
   const resetHistory = useCallback(async () => {
+    for (const item of [...savedItems, ...watchedItems]) sendHide(item); // clear the lists on every device
     setSwipedIds(new Set());
     setLikedIds(new Set());
     setWatchedIds(new Set());
@@ -335,7 +390,7 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       userKey(username, 'activityLog'),
       userKey(username, 'watchedRatings'),
     ]);
-  }, [username]);
+  }, [username, savedItems, watchedItems]);
 
   const cacheDeckItems = useCallback((items: MediaItem[]) => {
     setDeckCache(prev => {

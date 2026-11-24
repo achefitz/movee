@@ -58,7 +58,12 @@ open items) is `docs/HANDOFF.md`.
   accepts all pending. Activity feed and watch-party taste are only for `accepted` follows.
 - **Cold start**: `service.deck()` multiplies scores by a random factor that fades out over the first
   10 swipes (varied first decks); onboarding titles are shuffled and take `exclude` for "Show more".
-- Local per-user data in AsyncStorage (saved items, filters…) is still keyed by username.
+- **Watchlist / Watched follow the account**: on load, `AppContext` replaces its AsyncStorage copy
+  with `GET /api/recs/library` (liked + watched with `myRating`, newest first, and `known` keys);
+  local items the server doesn't know yet (still queued) are kept. Removing a title queues
+  `POST /api/recs/hide` (`recs_interactions.hidden`): gone from lists, profiles and feeds on every
+  device, but the swipe still trains the recommender; a new swipe on it un-hides it. "Seen" is saved
+  immediately; the "How was it?" prompt only adds the rating. Filters etc. stay local, keyed by username.
 
 ### Mobile key files
 

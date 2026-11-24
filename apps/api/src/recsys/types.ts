@@ -39,6 +39,8 @@ export type Interaction = {
   itemKey: string;
   action: Action;
   ts: number;
+  /** Removed from the user's lists; still a swipe for the recommender. */
+  hidden?: boolean;
 };
 
 export type Era = 'all' | 'new' | 'classic';

@@ -30,6 +30,8 @@ const RT_TTL = 14 * 24 * 3600_000;
 const COLD_START_SWIPES = 10;
 const COLD_START_JITTER = 0.8;
 const RT_WAIT_MS = 2500;
+const LIBRARY_LIMIT = 2000;
+type MediaItem = ReturnType<typeof toMediaItem>;
 const BAYES_IDX = featureIndex('item_bayes_rating');
 
 const GENRE_NAMES: Record<number, string> = {
@@ -300,7 +302,7 @@ export class RecsService {
   /** A user's recent likes and watches (newest first), for friends' activity feeds. */
   async recentActivity(userId: string, limit: number): Promise<ActivityEvent[]> {
     const hist = (await this.store.getUserInteractions(userId))
-      .filter(i => i.action === 'like' || i.action.startsWith('seen'))
+      .filter(i => !i.hidden && (i.action === 'like' || i.action.startsWith('seen')))
       .sort((a, b) => b.ts - a.ts)
       .slice(0, limit);
     const items = await this.catalog.getItems(hist.map(h => h.itemKey));
@@ -322,6 +324,30 @@ export class RecsService {
   async feedback(userId: string, key: string, action: Action, impressionId: string | null) {
     await this.store.upsertInteraction({ userId, itemKey: key, action, ts: Date.now() }, impressionId);
     void this.maybeTrain();
+  }
+
+  /**
+   * The signed-in user's own lists, newest first: liked titles (Watchlist) and watched titles
+   * with their rating. `known` is every title the server has a swipe for, hidden or not, so the
+   * app can tell "removed on another device" from "not uploaded yet".
+   */
+  async library(userId: string) {
+    const hist = (await this.store.getUserInteractions(userId)).sort((a, b) => b.ts - a.ts);
+    const shown = hist.filter(i => !i.hidden && (i.action === 'like' || i.action.startsWith('seen'))).slice(0, LIBRARY_LIMIT);
+    const items = await this.catalog.getItems(shown.map(h => h.itemKey));
+    const liked: Array<MediaItem & { at: number }> = [];
+    const watched: Array<MediaItem & { at: number; myRating: 'up' | 'meh' | 'down' | null }> = [];
+    for (const h of shown) {
+      const it = items.get(h.itemKey);
+      if (!it) continue;
+      if (h.action === 'like') liked.push({ ...toMediaItem(it), at: h.ts });
+      else watched.push({ ...toMediaItem(it), at: h.ts, myRating: (h.action.slice(5) || null) as 'up' | 'meh' | 'down' | null });
+    }
+    return { liked, watched, known: hist.map(h => h.itemKey) };
+  }
+
+  async hide(userId: string, key: string) {
+    await this.store.setHidden(userId, key, true);
   }
 
   async undo(userId: string, key: string) {

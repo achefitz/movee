@@ -442,6 +442,35 @@ try {
   assert.equal((await call('GET', `${U}/nobody_here`, undefined, aliceT)).status, 404);
   ok('private profile hidden until approved; "follows you" shown; unknown → 404');
 
+  // 16. Library: lists follow the account; removals hide without forgetting the swipe
+  const libT = await tokenFor('lib_user');
+  const libDeck = (await post('/deck', { userId: 'lib_user', limit: 6 })).body.items as any[];
+  const [l1, l2, w1, w2] = libDeck.map(i => i.key as string);
+  for (const [key, action] of [[l1, 'like'], [l2, 'like'], [w1, 'seen'], [w2, 'seen_up']] as const) {
+    await call('POST', `${base}/feedback`, { key, action }, libT);
+  }
+  const lib = (await call('GET', `${base}/library`, undefined, libT)).body;
+  const keyOf = (i: any) => `${i.type}:${i.id}`;
+  assert.deepEqual(lib.liked.map(keyOf).sort(), [l1, l2].sort());
+  assert.deepEqual(lib.watched.map(keyOf).sort(), [w1, w2].sort());
+  assert.equal(lib.watched.find((i: any) => keyOf(i) === w2).myRating, 'up');
+  assert.equal(lib.watched.find((i: any) => keyOf(i) === w1).myRating, null);
+  assert.ok(lib.liked.every((i: any) => i.title && i.posterUrl !== undefined));
+  ok('library returns liked and watched titles (with your rating) from the server');
+  await call('POST', `${base}/hide`, { key: l1 }, libT);
+  await call('POST', `${base}/hide`, { key: w1 }, libT);
+  const lib2 = (await call('GET', `${base}/library`, undefined, libT)).body;
+  assert.deepEqual(lib2.liked.map(keyOf), [l2]);
+  assert.deepEqual(lib2.watched.map(keyOf), [w2]);
+  assert.ok(lib2.known.includes(l1) && lib2.known.includes(w1), 'hidden swipes must stay known');
+  const libProfile = (await call('GET', `${root}/users/lib_user`, undefined, aliceT)).body;
+  assert.ok(!libProfile.liked.some((i: any) => keyOf(i) === l1), 'hidden title still on profile');
+  const libDeck2 = (await post('/deck', { userId: 'lib_user', limit: 20 })).body.items.map((i: any) => i.key);
+  assert.ok(!libDeck2.includes(l1) && !libDeck2.includes(w1), 'hidden title came back in the deck');
+  await call('POST', `${base}/feedback`, { key: l1, action: 'like' }, libT);
+  assert.ok((await call('GET', `${base}/library`, undefined, libT)).body.liked.some((i: any) => keyOf(i) === l1));
+  ok('removing hides a title everywhere but keeps the swipe; liking it again brings it back');
+
   // 13. Varied first decks + onboarding "show more"
   const firsts = await Promise.all(['fresh_a', 'fresh_b', 'fresh_c'].map(async n => (await post('/deck', { userId: n, limit: 15 })).body.items.map((i: any) => i.key) as string[]));
   const overlap = (a: string[], b: string[]) => a.filter(k => b.includes(k)).length / a.length;

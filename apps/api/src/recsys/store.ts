@@ -16,6 +16,7 @@ export interface RecsStore {
   getAllInteractions(limit: number): Promise<Interaction[]>;
   upsertInteraction(i: Interaction, impressionId: string | null): Promise<void>;
   deleteInteraction(userId: string, itemKey: string): Promise<void>;
+  setHidden(userId: string, itemKey: string, hidden: boolean): Promise<void>;
   getItems(keys: string[]): Promise<Map<string, CatalogItem>>;
   getRecentItems(limit: number): Promise<CatalogItem[]>;
   upsertItems(items: CatalogItem[]): Promise<void>;
@@ -38,8 +39,8 @@ export async function createPgStore(): Promise<RecsStore> {
   } = (await import('@movee/db')) as Db;
   const CHUNK = 500;
 
-  const toInteraction = (r: { userId: string; itemKey: string; action: string; createdAt: Date }): Interaction => ({
-    userId: r.userId, itemKey: r.itemKey, action: r.action as Action, ts: r.createdAt.getTime(),
+  const toInteraction = (r: { userId: string; itemKey: string; action: string; hidden: boolean; createdAt: Date }): Interaction => ({
+    userId: r.userId, itemKey: r.itemKey, action: r.action as Action, ts: r.createdAt.getTime(), hidden: r.hidden,
   });
 
   return {
@@ -56,11 +57,14 @@ export async function createPgStore(): Promise<RecsStore> {
         .values({ userId: i.userId, itemKey: i.itemKey, action: i.action, impressionId, createdAt: new Date(i.ts) })
         .onConflictDoUpdate({
           target: [I.userId, I.itemKey],
-          set: { action: i.action, impressionId, createdAt: new Date(i.ts) },
+          set: { action: i.action, impressionId, hidden: false, createdAt: new Date(i.ts) },
         });
     },
     async deleteInteraction(userId, itemKey) {
       await db.delete(I).where(and(eq(I.userId, userId), eq(I.itemKey, itemKey)));
+    },
+    async setHidden(userId, itemKey, hidden) {
+      await db.update(I).set({ hidden }).where(and(eq(I.userId, userId), eq(I.itemKey, itemKey)));
     },
     async getItems(keys) {
       const out = new Map<string, CatalogItem>();
@@ -147,8 +151,12 @@ export function createMemoryStore(): RecsStore {
     async getAllInteractions(limit) {
       return [...interactions.values()].sort((a, b) => b.ts - a.ts).slice(0, limit);
     },
-    async upsertInteraction(i, impressionId) { interactions.set(k(i.userId, i.itemKey), { ...i, impressionId }); },
+    async upsertInteraction(i, impressionId) { interactions.set(k(i.userId, i.itemKey), { ...i, hidden: false, impressionId }); },
     async deleteInteraction(userId, itemKey) { interactions.delete(k(userId, itemKey)); },
+    async setHidden(userId, itemKey, hidden) {
+      const cur = interactions.get(k(userId, itemKey));
+      if (cur) interactions.set(k(userId, itemKey), { ...cur, hidden });
+    },
     async getItems(keys) {
       const out = new Map<string, CatalogItem>();
       for (const key of keys) { const v = items.get(key); if (v) out.set(key, v.item); }

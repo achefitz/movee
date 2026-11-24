@@ -262,13 +262,16 @@ export default function DiscoverScreen() {
     const k = keyOf(item);
     setDeck(prev => (prev[0] && keyOf(prev[0]) === k ? prev.slice(1) : prev.filter(i => keyOf(i) !== k)));
     if (direction === 'up') {
+      // Saved right away; "How was it?" only adds a rating, so closing the app never loses it.
+      markWatched(item);
+      sendSwipe(item, 'seen');
       setPendingRatingItem(item);
       return;
     }
     const liked = direction === 'right';
     recordSwipe(item, liked);
     sendSwipe(item, liked ? 'like' : 'skip');
-  }, [recordSwipe]);
+  }, [recordSwipe, markWatched]);
 
   /** Buttons animate the card exactly like a swipe does. */
   const swipeTop = (direction: SwipeDirection) => {
@@ -476,16 +479,11 @@ export default function DiscoverScreen() {
         <RatingPrompt
           item={pendingRatingItem}
           onRate={(rating) => {
-            markWatched(pendingRatingItem);
             rateWatched(pendingRatingItem.id, rating);
             sendSwipe(pendingRatingItem, `seen_${rating}`);
             setPendingRatingItem(null);
           }}
-          onSkip={() => {
-            markWatched(pendingRatingItem);
-            sendSwipe(pendingRatingItem, 'seen');
-            setPendingRatingItem(null);
-          }}
+          onSkip={() => setPendingRatingItem(null)}
         />
       )}
 
