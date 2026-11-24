@@ -14,26 +14,32 @@ import { MediaItem } from '@/services/tmdb';
 
 type Friend = {
   username: string;
-  addedAt: number;
+  /** 'pending' = waiting for a private account to approve. */
+  status: 'accepted' | 'pending';
+  since: number;
+  isPrivate?: boolean;
 };
 
 type FriendEvent = { item: MediaItem; action: 'liked' | 'watched'; timestamp: number; friendUsername: string };
 
 type WpPhase = 'loading' | 'swipe' | 'results';
 
-// Friends live on the server: you can see likes/watches of people you've added.
-async function loadFriends(): Promise<Friend[]> {
+type FollowLists = { following: Friend[]; followers: Friend[]; requests: Friend[] };
+
+// Follows live on the server. You see likes/watches of accounts you follow once they're
+// accepted (public accounts accept automatically; private ones approve each request).
+async function loadFollows(): Promise<FollowLists> {
   try {
-    return (await apiFetch<{ friends: Friend[] }>('/api/friends')).friends;
+    return await apiFetch<FollowLists>('/api/follows');
   } catch {
-    return [];
+    return { following: [], followers: [], requests: [] };
   }
 }
 
 async function loadFriendGenreScores(friendUsername: string): Promise<Record<number, number>> {
   try {
     return (await apiFetch<{ genreScores: Record<number, number> }>(
-      `/api/friends/${encodeURIComponent(friendUsername)}/taste`)).genreScores;
+      `/api/follows/${encodeURIComponent(friendUsername)}/taste`)).genreScores;
   } catch {
     return {};
   }
@@ -41,7 +47,7 @@ async function loadFriendGenreScores(friendUsername: string): Promise<Record<num
 
 async function loadFriendsActivity(): Promise<FriendEvent[]> {
   try {
-    return (await apiFetch<{ events: FriendEvent[] }>('/api/friends/activity?limit=20')).events;
+    return (await apiFetch<{ events: FriendEvent[] }>('/api/follows/activity?limit=20')).events;
   } catch {
     return [];
   }
@@ -104,7 +110,9 @@ export default function SocialScreen() {
   const { user } = useAuth();
   const { savedItems, watchedItems, activityLog, deckCache } = useAppContext();
 
-  const [friends, setFriends] = useState<Friend[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]); // accounts you follow
+  const [followers, setFollowers] = useState<Friend[]>([]);
+  const [requests, setRequests] = useState<Friend[]>([]);
   const [friendActivity, setFriendActivity] = useState<Array<{ item: MediaItem; action: 'liked' | 'watched'; timestamp: number; friendUsername: string }>>([]);
   const [inputUsername, setInputUsername] = useState('');
   const [addError, setAddError] = useState('');
@@ -127,14 +135,24 @@ export default function SocialScreen() {
   useEffect(() => {
     if (!currentUser) return;
     let cancelled = false;
-    Promise.all([loadFriends(), loadFriendsActivity()]).then(([f, events]) => {
+    Promise.all([loadFollows(), loadFriendsActivity()]).then(([lists, events]) => {
       if (cancelled) return;
-      setFriends(f);
+      setFriends(lists.following);
+      setFollowers(lists.followers);
+      setRequests(lists.requests);
       setFriendActivity(events);
       setLoadingFriends(false);
     });
     return () => { cancelled = true; };
   }, [currentUser]);
+
+  const refreshFollows = useCallback(async () => {
+    const [lists, events] = await Promise.all([loadFollows(), loadFriendsActivity()]);
+    setFriends(lists.following);
+    setFollowers(lists.followers);
+    setRequests(lists.requests);
+    setFriendActivity(events);
+  }, []);
 
   const handleAddFriend = useCallback(async () => {
     setAddError('');
@@ -146,30 +164,44 @@ export default function SocialScreen() {
     }
     if (!username.startsWith('@')) username = '@' + username;
     if (username.toLowerCase() === currentUser.toLowerCase()) {
-      setAddError("You can't add yourself as a friend.");
-      return;
-    }
-    if (friends.some(f => f.username.toLowerCase() === username.toLowerCase())) {
-      setAddError('You already added this friend.');
+      setAddError("You can't follow yourself.");
       return;
     }
     try {
-      const { friend } = await apiFetch<{ friend: Friend }>('/api/friends', { body: { username } });
-      setFriends(prev => [...prev, friend]);
-      setFriendActivity(await loadFriendsActivity());
+      const { follow } = await apiFetch<{ follow: Friend }>('/api/follows', { body: { username } });
+      setFriends(prev => [...prev, follow]);
       setInputUsername('');
-      setAddSuccess(`${friend.username} added!`);
-      setTimeout(() => setAddSuccess(''), 2500);
+      setAddSuccess(follow.status === 'pending'
+        ? `${follow.username} is private — request sent.`
+        : `Following ${follow.username}!`);
+      setTimeout(() => setAddSuccess(''), 3000);
+      if (follow.status === 'accepted') setFriendActivity(await loadFriendsActivity());
     } catch (e) {
       setAddError(e instanceof ApiError ? e.message : "Couldn't reach the server. Try again.");
     }
-  }, [inputUsername, friends, currentUser]);
+  }, [inputUsername, currentUser]);
 
+  /** Unfollow, or cancel a pending request. */
   const handleRemoveFriend = useCallback(async (username: string) => {
     setFriends(prev => prev.filter(f => f.username !== username));
     setFriendActivity(prev => prev.filter(a => a.friendUsername !== username));
     try {
-      await apiFetch(`/api/friends/${encodeURIComponent(username)}`, { method: 'DELETE' });
+      await apiFetch(`/api/follows/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    } catch {}
+  }, []);
+
+  const handleRequest = useCallback(async (username: string, decision: 'approve' | 'decline') => {
+    setRequests(prev => prev.filter(r => r.username !== username));
+    try {
+      await apiFetch(`/api/follows/requests/${encodeURIComponent(username)}/${decision}`, { method: 'POST' });
+    } catch {}
+    refreshFollows();
+  }, [refreshFollows]);
+
+  const handleRemoveFollower = useCallback(async (username: string) => {
+    setFollowers(prev => prev.filter(f => f.username !== username));
+    try {
+      await apiFetch(`/api/follows/followers/${encodeURIComponent(username)}`, { method: 'DELETE' });
     } catch {}
   }, []);
 
@@ -246,11 +278,11 @@ export default function SocialScreen() {
     return (
       <View style={[styles.container, { paddingTop: topPad }]}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Friends</Text>
+          <Text style={styles.headerTitle}>Social</Text>
         </View>
         <View style={styles.centered}>
           <Ionicons name="people-outline" size={56} color={Colors.textMuted} />
-          <Text style={styles.emptyText}>Sign in to use the Friends tab.</Text>
+          <Text style={styles.emptyText}>Sign in to use the Social tab.</Text>
         </View>
       </View>
     );
@@ -259,12 +291,12 @@ export default function SocialScreen() {
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Friends</Text>
+        <Text style={styles.headerTitle}>Social</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Add Friend</Text>
+          <Text style={styles.sectionTitle}>Follow someone</Text>
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
@@ -278,19 +310,49 @@ export default function SocialScreen() {
               returnKeyType="done"
             />
             <TouchableOpacity style={styles.addButton} onPress={handleAddFriend} activeOpacity={0.8}>
-              <Text style={styles.addButtonText}>Add</Text>
+              <Text style={styles.addButtonText}>Follow</Text>
             </TouchableOpacity>
           </View>
           {!!addError && <Text style={styles.errorText}>{addError}</Text>}
           {!!addSuccess && <Text style={styles.successText}>{addSuccess}</Text>}
         </View>
 
+        {requests.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Requests ({requests.length})</Text>
+            {requests.map(r => (
+              <View key={r.username} style={styles.friendRow}>
+                <View style={styles.friendAvatar}>
+                  <Text style={styles.friendAvatarText}>{r.username[1]?.toUpperCase() ?? '?'}</Text>
+                </View>
+                <Text style={styles.friendName}>{r.username}</Text>
+                <TouchableOpacity
+                  style={styles.approveBtn}
+                  onPress={() => handleRequest(r.username, 'approve')}
+                  activeOpacity={0.8}
+                  accessibilityLabel={`Approve ${r.username}`}
+                >
+                  <Text style={styles.approveBtnText}>Approve</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.declineBtn}
+                  onPress={() => handleRequest(r.username, 'decline')}
+                  activeOpacity={0.8}
+                  accessibilityLabel={`Decline ${r.username}`}
+                >
+                  <Text style={styles.declineBtnText}>Decline</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>My Friends</Text>
+          <Text style={styles.sectionTitle}>Following</Text>
           {loadingFriends ? (
             <ActivityIndicator color={Colors.accent} style={{ marginVertical: 12 }} />
           ) : friends.length === 0 ? (
-            <Text style={styles.emptySmall}>No friends added yet. Search by @username above.</Text>
+            <Text style={styles.emptySmall}>You're not following anyone yet. Search by @username above.</Text>
           ) : (
             friends.map(friend => (
               <View key={friend.username} style={styles.friendRow}>
@@ -298,18 +360,55 @@ export default function SocialScreen() {
                   <Text style={styles.friendAvatarText}>{friend.username[1]?.toUpperCase() ?? '?'}</Text>
                 </View>
                 <Text style={styles.friendName}>{friend.username}</Text>
-                <TouchableOpacity
-                  style={styles.watchPartyBtn}
-                  onPress={() => handleWatchParty(friend)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.watchPartyBtnText}>Watch Party 🎉</Text>
-                </TouchableOpacity>
+                {friend.status === 'pending' ? (
+                  <View style={styles.pendingPill}>
+                    <Ionicons name="lock-closed" size={11} color={Colors.textSecondary} />
+                    <Text style={styles.pendingPillText}>Requested</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.watchPartyBtn}
+                    onPress={() => handleWatchParty(friend)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.watchPartyBtnText}>Watch Party 🎉</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={styles.removeBtn}
                   onPress={() => handleRemoveFriend(friend.username)}
                   activeOpacity={0.7}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel={friend.status === 'pending' ? `Cancel request to ${friend.username}` : `Unfollow ${friend.username}`}
+                >
+                  <Ionicons name="close-circle" size={22} color={Colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Followers ({followers.length})</Text>
+          {followers.length === 0 ? (
+            <Text style={styles.emptySmall}>
+              {user?.isPrivate
+                ? 'Your account is private: people need your approval to follow you.'
+                : 'Nobody follows you yet. Share your @username!'}
+            </Text>
+          ) : (
+            followers.map(f => (
+              <View key={f.username} style={styles.friendRow}>
+                <View style={styles.friendAvatar}>
+                  <Text style={styles.friendAvatarText}>{f.username[1]?.toUpperCase() ?? '?'}</Text>
+                </View>
+                <Text style={styles.friendName}>{f.username}</Text>
+                <TouchableOpacity
+                  style={styles.removeBtn}
+                  onPress={() => handleRemoveFollower(f.username)}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel={`Remove follower ${f.username}`}
                 >
                   <Ionicons name="close-circle" size={22} color={Colors.textMuted} />
                 </TouchableOpacity>
@@ -637,6 +736,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  pendingPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14,
+    backgroundColor: Colors.bgElevated, borderWidth: 1, borderColor: Colors.border,
+  },
+  pendingPillText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  approveBtn: { backgroundColor: Colors.accent, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14 },
+  approveBtnText: { color: '#000', fontWeight: '800', fontSize: 12 },
+  declineBtn: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: Colors.border },
+  declineBtnText: { color: Colors.textSecondary, fontWeight: '700', fontSize: 12 },
   watchPartyBtn: {
     backgroundColor: 'rgba(245,197,24,0.15)',
     borderRadius: 10,

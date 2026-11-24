@@ -1,7 +1,8 @@
 # Movee
 
 Tinder-style movie & TV discovery app. pnpm workspace, TypeScript throughout.
-Setup and commands for humans are in `README.md`.
+Setup and commands for humans are in `README.md`; the full handoff (data, hosting, history,
+open items) is `docs/HANDOFF.md`.
 
 ## Layout
 
@@ -18,6 +19,7 @@ Setup and commands for humans are in `README.md`.
 - `pnpm test`: `apps/api/scripts/recsys-e2e.ts`; the whole API (accounts, friends, recommender) against a
   fake TMDB with in-memory stores.
 - `pnpm --filter @movee/api run recsys:simulate`: offline simulation with synthetic users.
+- `pnpm db:users` (newest sign-ups) / `pnpm db:studio` (Drizzle Studio in the browser).
 - `pnpm db:push`: apply schema changes (needs `DATABASE_URL`). Without `DATABASE_URL` the API uses
   an in-memory store.
 - Mobile deps must match Expo SDK 54: add native packages with `pnpm exec expo install <pkg>` in
@@ -47,8 +49,12 @@ Setup and commands for humans are in `README.md`.
   and `apiFetch()` attaches it; any 401 signs the user out via `onUnauthorized`. Use `apiFetch` for
   every API call. `context/AuthContext.tsx` moves old on-device accounts (`cs:accounts`) to the
   server on their first login.
-- **Friends** (`routes/friends.ts`) are one-directional: adding someone lets you see their recent
-  likes/watches and genre taste, which come from their swipes on the server.
+- **Follows** (`routes/follows.ts`; table still named `friends`, with `status`): following a public
+  account is accepted at once; following a private one (`users.is_private`, toggled via PATCH
+  `/api/auth/me {isPrivate}`) creates a `pending` request the owner approves/declines; going public
+  accepts all pending. Activity feed and watch-party taste are only for `accepted` follows.
+- **Cold start**: `service.deck()` multiplies scores by a random factor that fades out over the first
+  10 swipes (varied first decks); onboarding titles are shuffled and take `exclude` for "Show more".
 - Local per-user data in AsyncStorage (saved items, filters…) is still keyed by username.
 
 ### Mobile key files

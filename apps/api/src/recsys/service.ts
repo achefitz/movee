@@ -27,6 +27,8 @@ const RETRAIN_MIN_INTERVAL = 10 * 60_000;
 const CONTENT_POOL_MAX = 6000;
 const I2I_SEEDS = 12;
 const RT_TTL = 14 * 24 * 3600_000;
+const COLD_START_SWIPES = 10;
+const COLD_START_JITTER = 0.8;
 const RT_WAIT_MS = 2500;
 const BAYES_IDX = featureIndex('item_bayes_rating');
 
@@ -184,7 +186,15 @@ export class RecsService {
     };
 
     // Pass 1: rank on cheap metadata, keeping 'unknown' items in play.
-    const pass1 = scoreCandidates(cands, items, it => matchesFilters(it, f, now) !== 'no', profile, this.stats, this.model, now)
+    // New accounts all start from the same popular pool; a random nudge that fades out over
+    // their first swipes gives each of them a different first deck.
+    const coldness = Math.max(0, 1 - profile.n / COLD_START_SWIPES);
+    const jitter = <T extends { score: number }>(xs: T[]) => {
+      // Proportional, so it reshuffles similar-fit cards without burying onboarding picks.
+      if (coldness > 0) for (const x of xs) x.score *= 1 + Math.random() * COLD_START_JITTER * coldness;
+      return xs;
+    };
+    const pass1 = jitter(scoreCandidates(cands, items, it => matchesFilters(it, f, now) !== 'no', profile, this.stats, this.model, now))
       .sort((a, b) => b.score - a.score);
     const topN = Math.max(60, limit * 3);
     // Reserve room for well-rated titles far from the current taste, so the
@@ -199,7 +209,7 @@ export class RecsService {
     // Pass 2: fetch keywords / cast / providers for the shortlist, then rescore exactly.
     const enriched = await this.catalog.enrich(first.map(s => s.item), now);
     const shortlist = new Map<string, Candidate>(first.map(s => [s.item.key, s.cand]));
-    const second = scoreCandidates(shortlist, enriched, keep, profile, this.stats, this.model, now);
+    const second = jitter(scoreCandidates(shortlist, enriched, keep, profile, this.stats, this.model, now));
     const ranked = rerank(second, profile.n, limit, isNovel) as Array<Scored & { cand: Candidate }>;
 
     await this.refreshRottenTomatoes(ranked.map(s => s.item));
@@ -232,27 +242,33 @@ export class RecsService {
    * Popular titles for the "pick your favorites" onboarding step: round-robin across the
    * chosen genres so one genre doesn't fill the grid, topped up from overall popularity.
    */
-  async onboardingTitles(genres: number[], limit = 20): Promise<Array<ReturnType<typeof toMediaItem>>> {
-    const picked: CatalogItem[] = [];
-    const seen = new Set<string>();
-    const take = (it: CatalogItem | undefined) => {
-      if (!it || seen.has(it.key) || !it.posterPath || picked.length >= limit) return;
+  async onboardingTitles(genres: number[], limit = 20, exclude: Set<string> = new Set()): Promise<Array<ReturnType<typeof toMediaItem>>> {
+    const ordered: CatalogItem[] = [];
+    const seen = new Set<string>(exclude);
+    const add = (it: CatalogItem | undefined) => {
+      if (!it || seen.has(it.key) || !it.posterPath) return;
       seen.add(it.key);
-      picked.push(it);
+      ordered.push(it);
     };
     const byKeys = async (keys: string[]) => {
       const m = await this.catalog.getItems(keys);
       return keys.map(k => m.get(k)).filter((x): x is CatalogItem => !!x);
     };
     if (genres.length) {
-      const pool = await byKeys((await this.catalog.getPools({ ...DEFAULT_FILTERS, genres })).popular);
+      const pools = await this.catalog.getPools({ ...DEFAULT_FILTERS, genres });
+      const pool = await byKeys([...pools.popular, ...pools.topRated]);
       const perGenre = genres.map(g => pool.filter(it => canonicalGenres(it).includes(g)));
-      for (let i = 0; picked.length < limit && perGenre.some(l => i < l.length); i++) {
-        for (const l of perGenre) take(l[i]);
-      }
+      for (let i = 0; perGenre.some(l => i < l.length); i++) for (const l of perGenre) add(l[i]);
     }
-    for (const it of await byKeys((await this.catalog.getPools(DEFAULT_FILTERS)).popular)) take(it);
-    return picked.map(toMediaItem);
+    const all = await this.catalog.getPools(DEFAULT_FILTERS);
+    for (const it of await byKeys([...all.popular, ...all.topRated, ...all.explore])) add(it);
+    // Well-known titles first, but shuffled within the top few dozen so everyone's grid differs.
+    const head = ordered.slice(0, limit * 3);
+    for (let i = head.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [head[i], head[j]] = [head[j], head[i]];
+    }
+    return head.slice(0, limit).map(toMediaItem);
   }
 
   /** Titles chosen at onboarding are recorded as watched-and-loved. */

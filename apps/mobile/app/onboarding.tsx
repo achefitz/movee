@@ -29,6 +29,7 @@ export default function OnboardingScreen() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
 
   const toggleGenre = (id: number) =>
@@ -59,6 +60,22 @@ export default function OnboardingScreen() {
   useEffect(() => {
     if (step === 'titles') loadTitles();
   }, [step, loadTitles]);
+
+  // "Don't know these?" — 20 more, never repeating what's already on screen.
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setError('');
+    try {
+      const params = [genres.length ? `genres=${genres.join(',')}` : '', `exclude=${titles.map(keyOf).join(',')}`]
+        .filter(Boolean).join('&');
+      const { items } = await apiFetch<{ items: MediaItem[] }>(`/api/onboarding/titles?${params}`);
+      setTitles(prev => [...prev, ...items.filter(i => !prev.some(p => keyOf(p) === keyOf(i)))]);
+    } catch {
+      setError("Couldn't load more titles. Try again.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const finish = async (withAnswers: boolean) => {
     setSaving(true);
@@ -172,6 +189,22 @@ export default function OnboardingScreen() {
                 })}
               </View>
             )}
+            {!loading && titles.length > 0 && (
+              <TouchableOpacity
+                style={styles.moreBtn}
+                onPress={loadMore}
+                disabled={loadingMore}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+              >
+                {loadingMore
+                  ? <ActivityIndicator color={Colors.accent} />
+                  : <>
+                      <Ionicons name="refresh" size={16} color={Colors.accent} />
+                      <Text style={styles.moreText}>Don't know these? Show more titles</Text>
+                    </>}
+              </TouchableOpacity>
+            )}
             {error ? (
               <TouchableOpacity onPress={loadTitles}>
                 <Text style={styles.error}>{error} Tap to retry.</Text>
@@ -232,6 +265,12 @@ const styles = StyleSheet.create({
   },
   tileTitle: { color: Colors.textSecondary, fontSize: 12 },
   center: { paddingVertical: 60, alignItems: 'center' },
+  moreBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 18, paddingVertical: 14, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bgCard,
+  },
+  moreText: { color: Colors.accent, fontWeight: '700', fontSize: 14 },
   error: { color: Colors.skip, textAlign: 'center', marginTop: 16 },
   footer: {
     flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 12,

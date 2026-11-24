@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "node ./dev.mjs",
     "dev:api": "pnpm --filter @movee/api run dev",
@@ -11,7 +13,9 @@
     "db:up": "docker compose up -d db",
     "db:push": "pnpm --filter @movee/db run push",
     "typecheck": "pnpm -r run typecheck",
-    "test": "pnpm --filter @movee/api run recsys:e2e"
+    "test": "pnpm --filter @movee/api run recsys:e2e",
+    "db:studio": "pnpm --filter @movee/db run studio",
+    "db:users": "pnpm --filter @movee/db run users"
   },
   "devDependencies": {
     "typescript": "~5.9.2"

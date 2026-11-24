@@ -19,8 +19,12 @@ router.get('/titles', async (req, res, next) => {
     const raw = typeof req.query.genres === 'string' ? req.query.genres.split(',').filter(Boolean).map(Number) : [];
     const genres = GenreList.safeParse(raw);
     if (!genres.success) return void res.status(400).json({ error: 'Invalid genres' });
+    // "Show more titles": the app sends what it already showed.
+    const exclude = typeof req.query.exclude === 'string'
+      ? new Set(req.query.exclude.split(',').filter(k => parseKey(k) !== null).slice(0, 300))
+      : new Set<string>();
     const svc = await getRecsService();
-    res.json({ items: await svc.onboardingTitles(genres.data, 20) });
+    res.json({ items: await svc.onboardingTitles(genres.data, 20, exclude) });
   } catch (err) { next(err); }
 });
 

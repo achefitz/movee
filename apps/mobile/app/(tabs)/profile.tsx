@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity,
-  ScrollView, Platform, Alert, LayoutAnimation, UIManager,
+  ScrollView, Platform, Alert, LayoutAnimation, UIManager, Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -84,7 +84,7 @@ function useViewerType(topGenreNames: string[], moviePct: number, tvPct: number,
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { profileName, stats, getTopGenres, savedItems, resetHistory } = useAppContext();
-  const { user, logout } = useAuth();
+  const { user, logout, setPrivate } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const displayName = user?.username ?? profileName;
@@ -225,6 +225,32 @@ export default function ProfileScreen() {
             <Text style={styles.emptyText}>Swipe on more content to build your taste profile</Text>
           </View>
         )}
+      </View>
+
+      <View style={styles.section}>
+        <View style={[styles.prefList, styles.privacyCard]}>
+          <View style={[styles.prefIcon, styles.settingsIcon]}>
+            <Ionicons name={user?.isPrivate ? 'lock-closed' : 'globe-outline'} size={20} color={Colors.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.accordionTitle}>Private account</Text>
+            <Text style={styles.privacyHint}>
+              {user?.isPrivate
+                ? 'You approve each follower before they see your likes and watches.'
+                : 'Anyone who follows you can see your likes and watches.'}
+            </Text>
+          </View>
+          <Switch
+            value={!!user?.isPrivate}
+            onValueChange={async v => {
+              const res = await setPrivate(v);
+              if (!res.success) Alert.alert("Couldn't update privacy", res.error ?? 'Try again.');
+            }}
+            trackColor={{ true: Colors.accent, false: Colors.border }}
+            thumbColor="#fff"
+            accessibilityLabel="Private account"
+          />
+        </View>
       </View>
 
       <View style={styles.section}>
@@ -467,6 +493,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: Colors.textPrimary,
+  },
+  privacyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+  },
+  privacyHint: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
   },
   settingsIcon: {
     backgroundColor: 'rgba(245,197,24,0.1)',

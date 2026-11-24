@@ -4,8 +4,12 @@ export type User = {
   hasSeenTutorial: boolean;
   favoriteGenres: number[];
   onboarded: boolean;
+  isPrivate: boolean;
   createdAt: number;
 };
+
+export type FollowStatus = 'accepted' | 'pending';
+export type Follow = { user: User; status: FollowStatus; since: number };
 
 export type UserWithHash = User & { passwordHash: string };
 
@@ -25,10 +29,19 @@ export interface AuthStore {
   deleteSession(tokenHash: string): Promise<void>;
   deleteExpiredSessions(): Promise<void>;
 
-  addFriend(userId: string, friendId: string): Promise<void>;
-  removeFriend(userId: string, friendId: string): Promise<void>;
-  listFriends(userId: string): Promise<Array<{ user: User; addedAt: number }>>;
-  isFriend(userId: string, friendId: string): Promise<boolean>;
+  setPrivate(id: string, isPrivate: boolean): Promise<void>;
+
+  /** Creates the follow if absent (existing follows keep their status). */
+  follow(followerId: string, followeeId: string, status: FollowStatus): Promise<void>;
+  unfollow(followerId: string, followeeId: string): Promise<void>;
+  setFollowStatus(followerId: string, followeeId: string, status: FollowStatus): Promise<void>;
+  /** Approve every pending request to this account (used when it goes public). */
+  acceptAllPending(followeeId: string): Promise<void>;
+  followStatus(followerId: string, followeeId: string): Promise<FollowStatus | null>;
+  /** Accounts this user follows (incl. pending requests they sent). */
+  listFollowing(userId: string): Promise<Follow[]>;
+  /** Accounts following this user (incl. pending requests to approve). */
+  listFollowers(userId: string): Promise<Follow[]>;
 }
 
 type UserRow = {
@@ -37,6 +50,7 @@ type UserRow = {
   hasSeenTutorial: boolean;
   favoriteGenres: number[];
   onboardedAt: Date | number | null;
+  isPrivate: boolean;
   createdAt: Date | number;
 };
 
@@ -46,6 +60,7 @@ const pub = (u: UserRow): User => ({
   hasSeenTutorial: u.hasSeenTutorial,
   favoriteGenres: u.favoriteGenres ?? [],
   onboarded: u.onboardedAt != null,
+  isPrivate: !!u.isPrivate,
   createdAt: u.createdAt instanceof Date ? u.createdAt.getTime() : u.createdAt,
 });
 
@@ -97,25 +112,41 @@ export async function createPgAuthStore(): Promise<AuthStore> {
     async deleteExpiredSessions() {
       await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
     },
-    async addFriend(userId, friendId) {
-      await db.insert(friends).values({ userId, friendId }).onConflictDoNothing();
+    async setPrivate(id, isPrivate) {
+      await db.update(users).set({ isPrivate }).where(eq(users.id, id));
     },
-    async removeFriend(userId, friendId) {
-      await db.delete(friends).where(and(eq(friends.userId, userId), eq(friends.friendId, friendId)));
+    async follow(followerId, followeeId, status) {
+      await db.insert(friends).values({ userId: followerId, friendId: followeeId, status }).onConflictDoNothing();
     },
-    async listFriends(userId) {
+    async unfollow(followerId, followeeId) {
+      await db.delete(friends).where(and(eq(friends.userId, followerId), eq(friends.friendId, followeeId)));
+    },
+    async setFollowStatus(followerId, followeeId, status) {
+      await db.update(friends).set({ status })
+        .where(and(eq(friends.userId, followerId), eq(friends.friendId, followeeId)));
+    },
+    async acceptAllPending(followeeId) {
+      await db.update(friends).set({ status: 'accepted' })
+        .where(and(eq(friends.friendId, followeeId), eq(friends.status, 'pending')));
+    },
+    async followStatus(followerId, followeeId) {
+      const [r] = await db.select({ status: friends.status }).from(friends)
+        .where(and(eq(friends.userId, followerId), eq(friends.friendId, followeeId))).limit(1);
+      return (r?.status as FollowStatus | undefined) ?? null;
+    },
+    async listFollowing(userId) {
       const rows = await db
-        .select({ user: users, addedAt: friends.createdAt })
-        .from(friends)
-        .innerJoin(users, eq(users.id, friends.friendId))
-        .where(eq(friends.userId, userId))
-        .orderBy(friends.createdAt);
-      return rows.map(r => ({ user: pub(r.user), addedAt: r.addedAt.getTime() }));
+        .select({ user: users, status: friends.status, since: friends.createdAt })
+        .from(friends).innerJoin(users, eq(users.id, friends.friendId))
+        .where(eq(friends.userId, userId)).orderBy(friends.createdAt);
+      return rows.map(r => ({ user: pub(r.user), status: r.status as FollowStatus, since: r.since.getTime() }));
     },
-    async isFriend(userId, friendId) {
-      const [r] = await db.select({ x: friends.userId }).from(friends)
-        .where(and(eq(friends.userId, userId), eq(friends.friendId, friendId))).limit(1);
-      return !!r;
+    async listFollowers(userId) {
+      const rows = await db
+        .select({ user: users, status: friends.status, since: friends.createdAt })
+        .from(friends).innerJoin(users, eq(users.id, friends.userId))
+        .where(eq(friends.friendId, userId)).orderBy(friends.createdAt);
+      return rows.map(r => ({ user: pub(r.user), status: r.status as FollowStatus, since: r.since.getTime() }));
     },
   };
 }
@@ -125,13 +156,14 @@ export async function createPgAuthStore(): Promise<AuthStore> {
 export function createMemoryAuthStore(): AuthStore {
   const byId = new Map<string, UserRow & { passwordHash: string }>();
   const sessions = new Map<string, { userId: string; expiresAt: number }>();
-  const follows = new Map<string, Map<string, number>>();
+  // followerId → followeeId → { status, since }
+  const follows = new Map<string, Map<string, { status: FollowStatus; since: number }>>();
 
   return {
     async createUser(u) {
       const lower = u.username.toLowerCase();
       for (const x of byId.values()) if (x.username.toLowerCase() === lower) return null;
-      const row = { id: u.id, username: u.username, passwordHash: u.passwordHash, hasSeenTutorial: false, favoriteGenres: [] as number[], onboardedAt: null, createdAt: Date.now() };
+      const row = { id: u.id, username: u.username, passwordHash: u.passwordHash, hasSeenTutorial: false, favoriteGenres: [] as number[], onboardedAt: null, isPrivate: false, createdAt: Date.now() };
       byId.set(u.id, row);
       return pub(row);
     },
@@ -155,16 +187,35 @@ export function createMemoryAuthStore(): AuthStore {
     async extendSession(tokenHash, expiresAt) { const s = sessions.get(tokenHash); if (s) s.expiresAt = expiresAt.getTime(); },
     async deleteSession(tokenHash) { sessions.delete(tokenHash); },
     async deleteExpiredSessions() { for (const [k, s] of sessions) if (s.expiresAt < Date.now()) sessions.delete(k); },
-    async addFriend(userId, friendId) {
-      let m = follows.get(userId);
-      if (!m) follows.set(userId, (m = new Map()));
-      if (!m.has(friendId)) m.set(friendId, Date.now());
+    async setPrivate(id, isPrivate) { const u = byId.get(id); if (u) u.isPrivate = isPrivate; },
+    async follow(followerId, followeeId, status) {
+      let m = follows.get(followerId);
+      if (!m) follows.set(followerId, (m = new Map()));
+      if (!m.has(followeeId)) m.set(followeeId, { status, since: Date.now() });
     },
-    async removeFriend(userId, friendId) { follows.get(userId)?.delete(friendId); },
-    async listFriends(userId) {
-      return [...(follows.get(userId) ?? new Map<string, number>()).entries()]
-        .flatMap(([id, at]) => { const u = byId.get(id); return u ? [{ user: pub(u), addedAt: at }] : []; });
+    async unfollow(followerId, followeeId) { follows.get(followerId)?.delete(followeeId); },
+    async setFollowStatus(followerId, followeeId, status) {
+      const f = follows.get(followerId)?.get(followeeId);
+      if (f) f.status = status;
     },
-    async isFriend(userId, friendId) { return !!follows.get(userId)?.has(friendId); },
+    async acceptAllPending(followeeId) {
+      for (const m of follows.values()) { const f = m.get(followeeId); if (f?.status === 'pending') f.status = 'accepted'; }
+    },
+    async followStatus(followerId, followeeId) { return follows.get(followerId)?.get(followeeId)?.status ?? null; },
+    async listFollowing(userId) {
+      return [...(follows.get(userId)?.entries() ?? [])].flatMap(([id, f]) => {
+        const u = byId.get(id);
+        return u ? [{ user: pub(u), status: f.status, since: f.since }] : [];
+      });
+    },
+    async listFollowers(userId) {
+      const out: Follow[] = [];
+      for (const [followerId, m] of follows) {
+        const f = m.get(userId);
+        const u = byId.get(followerId);
+        if (f && u) out.push({ user: pub(u), status: f.status, since: f.since });
+      }
+      return out.sort((a, b) => a.since - b.since);
+    },
   };
 }

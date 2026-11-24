@@ -110,16 +110,23 @@ router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
-const MePatch = z.object({ hasSeenTutorial: z.boolean() });
+const MePatch = z.object({ hasSeenTutorial: z.boolean().optional(), isPrivate: z.boolean().optional() })
+  .refine(b => b.hasSeenTutorial !== undefined || b.isPrivate !== undefined);
 
 router.patch('/me', requireAuth, async (req, res, next) => {
   try {
     const parsed = MePatch.safeParse(req.body);
     if (!parsed.success) return void res.status(400).json({ error: 'Invalid request' });
     const store = await getAuthStore();
-    await store.setTutorialSeen(req.user!.id, parsed.data.hasSeenTutorial);
-    forgetUser(req.user!.id);
-    res.json({ user: await store.findById(req.user!.id) });
+    const id = req.user!.id;
+    if (parsed.data.hasSeenTutorial !== undefined) await store.setTutorialSeen(id, parsed.data.hasSeenTutorial);
+    if (parsed.data.isPrivate !== undefined) {
+      await store.setPrivate(id, parsed.data.isPrivate);
+      // Going public lets everyone who asked in.
+      if (!parsed.data.isPrivate) await store.acceptAllPending(id);
+    }
+    forgetUser(id);
+    res.json({ user: await store.findById(id) });
   } catch (err) {
     next(err);
   }

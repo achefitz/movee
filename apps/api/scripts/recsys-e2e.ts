@@ -297,7 +297,9 @@ try {
   const genreHits = titles.body.items.filter((i: any) => i.genres.includes(27) || i.genres.includes(35)).length;
   assert.ok(genreHits >= 15, `only ${genreHits}/20 onboarding titles match the chosen genres`);
   ok(`onboarding grid: 20 popular titles, ${genreHits} in the chosen genres`);
-  const favs = titles.body.items.slice(0, 3).map((i: any) => i.key);
+  // Grid order is shuffled; pick horror titles to match the Horror genre pick.
+  const favs = titles.body.items.filter((i: any) => i.genres.includes(27)).slice(0, 3).map((i: any) => i.key);
+  assert.equal(favs.length, 3, 'not enough horror titles in the onboarding grid');
   const done = await call('POST', O, { genres: [27], favorites: favs }, newbie);
   assert.equal(done.body.user.onboarded, true);
   assert.deepEqual(done.body.user.favoriteGenres, [27]);
@@ -356,27 +358,69 @@ try {
     'an old film without a re-release is marked in theaters');
   ok('old films are never "in theaters" unless they are actually back in theaters');
 
-  // 10. Friends
-  const F = `${root}/friends`;
+  // 10. Follows + privacy
+  const F = `${root}/follows`;
   const aliceT = await tokenFor('alice');
+  const sim1T = await tokenFor('sim1');
   assert.equal((await call('GET', `${F}/sim1/taste`, undefined, aliceT)).status, 404);
-  ok("can't read someone's taste before adding them");
+  ok("can't read someone's taste without following them");
   assert.equal((await call('POST', F, { username: 'no_such_user' }, aliceT)).status, 404);
   assert.equal((await call('POST', F, { username: '@alice' }, aliceT)).status, 400);
-  assert.equal((await call('POST', F, { username: 'SIM1' }, aliceT)).status, 201);
+  const pub1 = await call('POST', F, { username: 'SIM1' }, aliceT);
+  assert.equal(pub1.status, 201); assert.equal(pub1.body.follow.status, 'accepted');
   assert.equal((await call('POST', F, { username: 'sim1' }, aliceT)).status, 409);
-  const fl = await call('GET', F, undefined, aliceT);
-  assert.deepEqual(fl.body.friends.map((f: any) => f.username), ['@sim1']);
-  ok('add friend: unknown → 404, self → 400, duplicate → 409');
+  ok('follow a public account: accepted at once; unknown → 404, self → 400, twice → 409');
   const act = await call('GET', `${F}/activity`, undefined, aliceT);
-  assert.ok(act.body.events.length > 0, 'no friend activity');
-  assert.ok(act.body.events.every((e: any) => e.friendUsername === '@sim1' && e.item.title && e.timestamp));
-  const friendTaste = await call('GET', `${F}/sim1/taste`, undefined, aliceT);
-  assert.ok(Object.keys(friendTaste.body.genreScores).length > 0);
-  ok(`friend activity (${act.body.events.length} events) and taste come from their swipes`);
+  assert.ok(act.body.events.length > 0 && act.body.events.every((e: any) => e.friendUsername === '@sim1' && e.item.title));
+  assert.ok(Object.keys((await call('GET', `${F}/sim1/taste`, undefined, aliceT)).body.genreScores).length > 0);
+  ok(`following feed (${act.body.events.length} events) and taste come from their swipes`);
+  const sim1Lists = (await call('GET', F, undefined, sim1T)).body;
+  assert.deepEqual(sim1Lists.followers.map((f: any) => f.username), ['@alice']);
+  ok('followers list shows who follows you');
+
+  // sim2 goes private: alice's follow becomes a request
+  const sim2T = await tokenFor('sim2');
+  assert.equal((await call('PATCH', `${A}/me`, { isPrivate: true }, sim2T)).body.user.isPrivate, true);
+  const req1 = await call('POST', F, { username: 'sim2' }, aliceT);
+  assert.equal(req1.body.follow.status, 'pending');
+  assert.equal((await call('GET', `${F}/sim2/taste`, undefined, aliceT)).status, 404);
+  assert.ok((await call('GET', `${F}/activity`, undefined, aliceT)).body.events.every((e: any) => e.friendUsername !== '@sim2'));
+  ok('private account: follow becomes a request; nothing visible until approved');
+  const inbox = (await call('GET', F, undefined, sim2T)).body;
+  assert.deepEqual(inbox.requests.map((r: any) => r.username), ['@alice']);
+  assert.equal(inbox.followers.length, 0);
+  assert.equal((await call('POST', `${F}/requests/alice/approve`, undefined, sim2T)).status, 200);
+  assert.equal((await call('GET', `${F}/sim2/taste`, undefined, aliceT)).status, 200);
+  assert.ok((await call('GET', `${F}/activity?limit=50`, undefined, aliceT)).body.events.some((e: any) => e.friendUsername === '@sim2'));
+  ok('approving a request unlocks their likes, watches and taste');
+  await call('DELETE', `${F}/followers/alice`, undefined, sim2T);
+  assert.equal((await call('GET', `${F}/sim2/taste`, undefined, aliceT)).status, 404);
+  ok('removing a follower revokes access');
+  const bobT = await tokenFor('bob');
+  await call('POST', F, { username: 'sim2' }, bobT);
+  assert.equal((await call('POST', `${F}/requests/bob/decline`, undefined, sim2T)).status, 200);
+  assert.equal((await call('GET', F, undefined, bobT)).body.following.length, 0);
+  await call('POST', F, { username: 'sim2' }, bobT);
+  await call('PATCH', `${A}/me`, { isPrivate: false }, sim2T);
+  assert.equal((await call('GET', F, undefined, bobT)).body.following[0].status, 'accepted');
+  ok('decline removes the request; going public approves everyone waiting');
   await call('DELETE', `${F}/sim1`, undefined, aliceT);
-  assert.equal((await call('GET', F, undefined, aliceT)).body.friends.length, 0);
-  ok('remove friend');
+  assert.ok((await call('GET', F, undefined, aliceT)).body.following.every((f: any) => f.username !== '@sim1'));
+  ok('unfollow');
+
+  // 13. Varied first decks + onboarding "show more"
+  const firsts = await Promise.all(['fresh_a', 'fresh_b', 'fresh_c'].map(async n => (await post('/deck', { userId: n, limit: 15 })).body.items.map((i: any) => i.key) as string[]));
+  const overlap = (a: string[], b: string[]) => a.filter(k => b.includes(k)).length / a.length;
+  const sameTop5 = firsts.every(d => d.slice(0, 5).join() === firsts[0].slice(0, 5).join());
+  console.log(`    first-deck overlap between new users: ${(overlap(firsts[0], firsts[1]) * 100).toFixed(0)}% / ${(overlap(firsts[0], firsts[2]) * 100).toFixed(0)}%`);
+  assert.ok(!sameTop5, 'three new users got the same first five cards');
+  ok('new users get different first decks');
+  const freshT = await tokenFor('fresh_a');
+  const page1 = (await call('GET', `${O}/titles?genres=35`, undefined, freshT)).body.items.map((i: any) => i.key) as string[];
+  const page2 = (await call('GET', `${O}/titles?genres=35&exclude=${page1.join(',')}`, undefined, freshT)).body.items.map((i: any) => i.key) as string[];
+  assert.equal(page2.length, 20);
+  assert.ok(page2.every(k => !page1.includes(k)), 'show-more repeated titles');
+  ok('onboarding "show more" brings 20 new titles, none repeated');
 
   console.log(`\n${passed} checks passed; ${tmdbCalls} fake TMDB calls`);
 } finally {

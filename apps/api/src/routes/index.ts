@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { requireAuth } from "../auth/middleware";
 import authRouter from "./auth";
-import friendsRouter from "./friends";
+import followsRouter from "./follows";
 import healthRouter from "./health";
 import onboardingRouter from "./onboarding";
 import recsRouter from "./recs";
@@ -17,7 +17,7 @@ router.use("/auth", authRouter);
 router.use("/tmdb", requireAuth, tmdbRouter);
 router.use("/viewer-type", requireAuth, viewerTypeRouter);
 router.use("/recs", recsRouter);
-router.use("/friends", friendsRouter);
+router.use("/follows", followsRouter);
 router.use("/onboarding", onboardingRouter);
 
 export default router;

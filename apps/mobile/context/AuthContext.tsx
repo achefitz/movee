@@ -10,6 +10,8 @@ export type User = {
   favoriteGenres: number[];
   /** False until the first-run questions are answered or skipped. */
   onboarded: boolean;
+  /** Private accounts approve each follower. */
+  isPrivate: boolean;
 };
 
 type AuthResult = { success: boolean; error?: string };
@@ -22,6 +24,7 @@ export type AuthContextType = {
   logout: () => Promise<void>;
   markTutorialSeen: () => Promise<void>;
   completeOnboarding: (genres: number[], favoriteKeys: string[]) => Promise<AuthResult>;
+  setPrivate: (isPrivate: boolean) => Promise<AuthResult>;
 };
 
 export const MIN_PASSWORD = 8;
@@ -200,8 +203,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const setPrivate = useCallback(async (isPrivate: boolean): Promise<AuthResult> => {
+    try {
+      const { user: updated } = await apiFetch<{ user: User }>('/api/auth/me', { method: 'PATCH', body: { isPrivate } });
+      setUser(updated);
+      await cacheUser(updated);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: messageOf(e) };
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, markTutorialSeen, completeOnboarding }}>
+    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, markTutorialSeen, completeOnboarding, setPrivate }}>
       {children}
     </AuthContext.Provider>
   );

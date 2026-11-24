@@ -6,6 +6,8 @@ export const users = pgTable("users", {
   usernameLower: text("username_lower").notNull().unique(), // uniqueness is case-insensitive
   passwordHash: text("password_hash").notNull(),
   hasSeenTutorial: boolean("has_seen_tutorial").notNull().default(false),
+  /** Private accounts approve each follower before their likes/watches are visible. */
+  isPrivate: boolean("is_private").notNull().default(false),
   /** TMDB movie genre ids picked during onboarding; seed the recommender's taste profile. */
   favoriteGenres: integer("favorite_genres").array().notNull().default([]),
   /** Set once the user finishes (or skips) onboarding. */
@@ -25,12 +27,16 @@ export const sessions = pgTable(
   (t) => [index("sessions_user").on(t.userId)],
 );
 
-/** One-directional "follow": userId added friendId. */
+/**
+ * Follows (table kept under its original name): userId follows friendId.
+ * status 'pending' = waiting for a private account to approve; 'accepted' = can see activity.
+ */
 export const friends = pgTable(
   "friends",
   {
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     friendId: text("friend_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("accepted"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.friendId] })],
