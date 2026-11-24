@@ -12,6 +12,7 @@ import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { MediaItem } from '@/services/tmdb';
+import { MediaDetailModal } from '@/components/MediaDetailModal';
 
 type Friend = {
   username: string;
@@ -120,6 +121,7 @@ export default function SocialScreen() {
   const [addSuccess, setAddSuccess] = useState('');
   const [loadingFriends, setLoadingFriends] = useState(true);
   const [activityModalVisible, setActivityModalVisible] = useState(false);
+  const [selectedTitle, setSelectedTitle] = useState<MediaItem | null>(null);
 
   const [watchPartyFriend, setWatchPartyFriend] = useState<Friend | null>(null);
   const [wpPhase, setWpPhase] = useState<WpPhase>('loading');
@@ -495,7 +497,13 @@ export default function SocialScreen() {
                 keyExtractor={(item, idx) => `${item.item.id}-${item.action}-${idx}`}
                 contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
                 renderItem={({ item: event }) => (
-                  <View style={styles.activityItem}>
+                  <TouchableOpacity
+                    style={styles.activityItem}
+                    onPress={() => setSelectedTitle(event.item)}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Details for ${event.item.title}`}
+                  >
                     {event.item.posterUrl ? (
                       <Image source={{ uri: event.item.posterUrl }} style={styles.activityPoster} />
                     ) : (
@@ -520,10 +528,11 @@ export default function SocialScreen() {
                       </View>
                       <Text style={styles.activityTime}>{relativeTime(event.timestamp)}</Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 )}
               />
             )}
+            <MediaDetailModal visible={!!selectedTitle} item={selectedTitle} onClose={() => setSelectedTitle(null)} />
           </View>
         </View>
       </Modal>

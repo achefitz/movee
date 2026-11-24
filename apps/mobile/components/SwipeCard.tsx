@@ -8,7 +8,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeYoutubePlayer } from './NativeYoutubePlayer';
-import { WebTrailer } from './WebTrailer';
+import { TRAILER_ZOOM, WebTrailer } from './WebTrailer';
 import { letterboxdUrl } from '../constants/links';
 import { Ratings } from './Ratings';
 import { MediaItem } from '../services/tmdb';
@@ -194,6 +194,13 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
 
   // Autoplay the top card's trailer; the poster stays until the video is really playing.
   const playTrailer = isTop && !!trailerKey && !trailerError && !stopped;
+  const showingVideo = playTrailer && videoVisible;
+  // The trailer plays at full card width in a 2:1 strip above the title, over a dimmed,
+  // blurred poster, instead of being zoomed to fill the whole card (which blew up on-screen
+  // text and showed the letterbox bars).
+  const bandH = Math.round(cardSize.width / 2);
+  const bandTop = Math.max(14, Math.round((cardSize.height * 0.58 - bandH) / 2));
+  const controlsTop = bandTop >= 64 ? 14 : bandTop + bandH + 10;
   const lbUrl = letterboxdUrl(item);
 
   const streamingBadges = (item.streamingIds || [])
@@ -217,7 +224,17 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
         <Image source={item.posterUrl} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
 
         {playTrailer && (
-          <View style={[StyleSheet.absoluteFill, styles.videoLayer, { opacity: videoVisible ? 1 : 0 }]} pointerEvents="none">
+          <View style={[StyleSheet.absoluteFill, { opacity: videoVisible ? 1 : 0 }]} pointerEvents="none">
+            <Image source={item.posterUrl} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={40} />
+            <View style={[StyleSheet.absoluteFill, styles.videoDim]} />
+          </View>
+        )}
+
+        {playTrailer && (
+          <View
+            style={[styles.videoLayer, { top: bandTop, height: bandH, opacity: videoVisible ? 1 : 0 }]}
+            pointerEvents="none"
+          >
             {Platform.OS === 'web' ? (
               <WebTrailer
                 ytKey={trailerKey!}
@@ -230,7 +247,8 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
                 videoId={trailerKey!}
                 isMuted={muted}
                 width={cardSize.width}
-                height={cardSize.height}
+                height={bandH}
+                zoom={TRAILER_ZOOM}
                 onPlaying={() => setVideoVisible(true)}
                 onError={() => { setTrailerError(true); setVideoVisible(false); }}
               />
@@ -252,7 +270,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
             ) : null}
           </View>
 
-          {item.reason ? (
+          {item.reason && !showingVideo ? (
             <View style={styles.reasonChip}>
               <Ionicons
                 name={item.reason === 'Something different' ? 'compass' : item.reason.startsWith('Because') ? 'sparkles' : 'trending-up'}
@@ -263,7 +281,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
             </View>
           ) : null}
 
-          <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
+          <Text style={[styles.title, showingVideo && styles.titleCompact]} numberOfLines={2}>{item.title}</Text>
 
           <View style={styles.metaRow}>
             <Ratings item={item} />
@@ -331,8 +349,8 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
           </TouchableOpacity>
         )}
 
-        {playTrailer && videoVisible && (
-          <View style={styles.playerControls}>
+        {showingVideo && (
+          <View style={[styles.playerControls, { top: controlsTop }]}>
             <TouchableOpacity
               accessibilityRole="button"
               style={styles.controlBtn}
@@ -426,8 +444,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   videoLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     overflow: 'hidden',
-    backgroundColor: '#000',
+  },
+  videoDim: {
+    backgroundColor: 'rgba(10,10,15,0.72)',
   },
   letterboxdBadge: {
     flexDirection: 'row',
@@ -462,12 +485,17 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   title: {
-    fontSize: 26,
+    fontSize: 24,
+    lineHeight: 29,
     fontWeight: '800',
     color: Colors.textPrimary,
-    marginBottom: 10,
+    marginBottom: 12,
     letterSpacing: -0.3,
     fontFamily: 'Inter_700Bold',
+  },
+  titleCompact: {
+    fontSize: 20,
+    lineHeight: 25,
   },
   metaRow: {
     flexDirection: 'row',
@@ -495,7 +523,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 8,
+    marginTop: 12,
     flexWrap: 'wrap',
   },
   streamingBadge: {

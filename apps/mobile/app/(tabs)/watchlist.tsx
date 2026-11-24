@@ -11,18 +11,21 @@ import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
 import { MediaItem } from '@/services/tmdb';
 import { shareItem } from '@/utils/share';
+import { MediaDetailModal } from '@/components/MediaDetailModal';
 
 type SubTab = 'towatch' | 'watched';
 
 function MediaRow({
   item,
   onRemove,
+  onOpen,
   onCheck,
   showCheck,
   rating,
 }: {
   item: MediaItem;
   onRemove: () => void;
+  onOpen: () => void;
   onCheck?: () => void;
   showCheck?: boolean;
   rating?: 'up' | 'meh' | 'down';
@@ -41,6 +44,13 @@ function MediaRow({
 
   return (
     <Animated.View style={[styles.row, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+      <TouchableOpacity
+        style={styles.rowMain}
+        onPress={onOpen}
+        activeOpacity={0.75}
+        accessibilityRole="button"
+        accessibilityLabel={`Details for ${item.title}`}
+      >
       <Image source={item.posterUrl} style={styles.rowPoster} contentFit="cover" />
       <View style={styles.rowInfo}>
         <View style={styles.titleRow}>
@@ -67,6 +77,7 @@ function MediaRow({
           <Text style={styles.rowGenres} numberOfLines={1}>{item.genreNames.slice(0, 2).join(', ')}</Text>
         ) : null}
       </View>
+      </TouchableOpacity>
       <View style={styles.rowActions}>
         {showCheck && (
           <TouchableOpacity style={styles.checkBtn} onPress={handleCheck} hitSlop={8} accessibilityRole="button" accessibilityLabel="Mark as watched">
@@ -87,6 +98,7 @@ function MediaRow({
 export default function WatchlistScreen() {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<SubTab>('towatch');
+  const [selected, setSelected] = useState<MediaItem | null>(null);
   const {
     savedItems, watchedItems, removeFromSaved, removeFromWatched,
     markWatched, watchedRatings,
@@ -173,6 +185,7 @@ export default function WatchlistScreen() {
               showCheck={activeTab === 'towatch'}
               onCheck={() => handleMoveToWatched(item)}
               onRemove={() => confirmRemove(item.id, activeTab === 'towatch')}
+              onOpen={() => setSelected(item)}
               rating={activeTab === 'watched' ? watchedRatings[item.id] : undefined}
             />
           )}
@@ -180,11 +193,24 @@ export default function WatchlistScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+      <MediaDetailModal
+        visible={!!selected}
+        item={selected}
+        onClose={() => setSelected(null)}
+        onWatched={selected && activeTab === 'towatch' ? () => { handleMoveToWatched(selected); setSelected(null); } : undefined}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  rowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minWidth: 0,
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.bg,

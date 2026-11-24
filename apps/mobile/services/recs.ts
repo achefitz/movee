@@ -114,8 +114,8 @@ export function sendHide(item: Pick<MediaItem, 'type' | 'id'>) {
 }
 
 export type Library = {
-  liked: MediaItem[];
-  watched: Array<MediaItem & { myRating: 'up' | 'meh' | 'down' | null }>;
+  liked: Array<MediaItem & { at: number }>;
+  watched: Array<MediaItem & { at: number; myRating: 'up' | 'meh' | 'down' | null }>;
   /** Every title the server has a swipe for (including removed ones). */
   known: string[];
 };

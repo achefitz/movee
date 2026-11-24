@@ -5,16 +5,17 @@ import YoutubeIframe from 'react-native-youtube-iframe';
 interface Props {
   videoId: string;
   isMuted: boolean;
-  /** Size of the card; the 16:9 video is scaled to cover it and the sides are cropped. */
+  /** Size of the frame; the 16:9 video covers it, zoomed by `zoom` to trim letterbox bars. */
   width: number;
   height: number;
   onPlaying: () => void;
   onError: () => void;
+  zoom?: number;
 }
 
-export function NativeYoutubePlayer({ videoId, isMuted, width, height, onPlaying, onError }: Props) {
-  const videoW = Math.max(width, Math.ceil(height * 16 / 9));
-  const videoH = Math.max(height, Math.ceil(videoW * 9 / 16));
+export function NativeYoutubePlayer({ videoId, isMuted, width, height, onPlaying, onError, zoom = 1 }: Props) {
+  const videoW = Math.ceil(Math.max(width, height * 16 / 9) * zoom);
+  const videoH = Math.ceil(videoW * 9 / 16);
   return (
     <View style={{ position: 'absolute', top: (height - videoH) / 2, left: (width - videoW) / 2, width: videoW, height: videoH }}>
       <YoutubeIframe

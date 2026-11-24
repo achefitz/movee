@@ -299,7 +299,7 @@ export default function DiscoverScreen() {
     filters.inTheaters ||
     filters.maxRuntime !== null;
 
-  const paddingTop = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
+  const paddingTop = Platform.OS === 'web' ? Math.max(insets.top, 12) : insets.top;
   const currentItem = deck[0] ?? null;
 
   const emptyTitle = hasActiveFilters ? 'No more matches' : "You've seen it all!";

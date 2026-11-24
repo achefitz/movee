@@ -243,3 +243,4 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 7. Hosted on Render + Neon (`render.yaml`).
 8. Age-rating filter (G … NC-17, TV mapped to TV-G … TV-MA) with a badge on cards; other users' profiles (`/user/<name>`, private accounts locked until approved) reachable from Social; Profile tiles open lists of liked movies / TV / watched; fixed the ✕ remove button on web (`utils/confirm.ts`).
 9. Watchlist and Watched are stored on the server and load on any device (`/api/recs/library`, removals via `/api/recs/hide` + `recs_interactions.hidden`); "Seen" saves before the rating prompt.
+10. Trailer shown as a 2:1 strip instead of cropped to fill; less top padding on web Discover; tapping any title (Watchlist, Profile lists, user profiles, activity feed) opens its details.

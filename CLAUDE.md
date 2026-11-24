@@ -72,7 +72,9 @@ open items) is `docs/HANDOFF.md`.
 - `components/SwipeCard.tsx`: drag or flick to swipe, haptics, imperative `swipe()` used by the
   buttons. On web both PanResponder and mouse handlers see a gesture; `claimRelease()` makes sure
   only one handles the release.
-- Trailers autoplay (muted, looping, cropped to fill) on the top card only: `components/WebTrailer.tsx`
+- Trailers autoplay (muted, looping) on the top card only, in a full-width 2:1 strip above the title
+  over a blurred, dimmed poster (video zoomed `TRAILER_ZOOM` to trim letterbox bars; not cropped to
+  fill the card, which blew up on-screen text). The reason chip hides and the title shrinks while it plays: `components/WebTrailer.tsx`
   (YouTube iframe + postMessage API: fades in on "playing", hides on error) and
   `components/NativeYoutubePlayer.tsx`. The video layer is `pointerEvents="none"` so swipes still work;
   the card's mouse fallback ignores presses inside `[role="button"]`, so give any touchable on the
@@ -100,6 +102,9 @@ open items) is `docs/HANDOFF.md`.
 - Profiles: `app/user/[username].tsx` + `GET /api/users/:username` (likes/watches visible if public,
   your own, or you're an approved follower). Usernames in the Social tab open it. Profile tab's
   Movies / TV Shows / Watched tiles open a `TitleGrid` sheet.
+- Tapping a title anywhere (Watchlist rows, `TitleGrid` in Profile lists and user profiles, the
+  Social activity feed) opens `MediaDetailModal`; render it inside any parent `Modal` so it stacks.
+  Your own activity feed is rebuilt from `/api/recs/library` like the lists.
 - On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync
   of on-device history.

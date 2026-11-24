@@ -131,7 +131,7 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       const merged: Filters = { ...defaultFilters, ...storedFilters };
       setFiltersState(merged);
       setIsLoaded(true);
-      if (username) await hydrateFromServer(saved, watchedList, ratings, swiped);
+      if (username) await hydrateFromServer(saved, watchedList, ratings, swiped, log);
     })();
   }, [username]);
 
@@ -145,6 +145,7 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     localWatched: MediaItem[],
     localRatings: Record<number, 'up' | 'meh' | 'down'>,
     localSwiped: number[],
+    localLog: ActivityEvent[],
   ) {
     let res: Awaited<ReturnType<typeof fetchLibrary>>;
     try { res = await fetchLibrary(); } catch { return; } // offline: keep what's on the device
@@ -168,6 +169,20 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     for (const w of serverWatched) if (w.myRating) nextRatings[w.id] = w.myRating;
     for (const w of watchedLocal) if (localRatings[w.id]) nextRatings[w.id] = localRatings[w.id];
     const nextSwiped = new Set([...localSwiped, ...lib.known.map(k => Number(k.split(':')[1]))]);
+
+    // Your own activity feed comes from the same server lists (newest first).
+    const serverEvents: ActivityEvent[] = [
+      ...lib.liked.filter(i => !pendingHides.has(keyOf(i))).map(i => ({ item: i as MediaItem, action: 'liked' as const, timestamp: i.at })),
+      ...serverWatched.map(({ myRating, ...i }) => ({ item: i as MediaItem, action: 'watched' as const, timestamp: i.at })),
+    ];
+    const localOnly = localLog.filter(e => !known.has(keyOf(e.item)) || pending.has(keyOf(e.item)));
+    const seenEvt = new Set<string>();
+    const nextLog = [...localOnly, ...serverEvents]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .filter(e => { const k = `${keyOf(e.item)}:${e.action}`; return !seenEvt.has(k) && !!seenEvt.add(k); })
+      .slice(0, MAX_ACTIVITY_LOG);
+    setActivityLog(nextLog);
+    save(userKey(username, 'activityLog'), nextLog);
 
     setSavedItems(nextSaved);
     setLikedIds(new Set(nextSaved.map(i => i.id)));

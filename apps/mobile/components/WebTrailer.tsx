@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 
 /**
- * Muted, looping YouTube trailer that fills its container (cropped like TikTok).
+ * Muted, looping YouTube trailer, TRAILER_ZOOM × its container's width and vertically
+ * centered: in the card's 2:1 strip that trims the black bars of widescreen trailers.
  * Talks to the player over YouTube's postMessage API so we know when it is really
  * playing (to fade it in over the poster) or failed (embedding disabled, removed…).
  * pointer-events: none — swipes and taps go to the card, not the iframe.
@@ -14,6 +15,7 @@ type Props = {
 };
 
 const ORIGIN = 'https://www.youtube.com';
+export const TRAILER_ZOOM = 1.15;
 
 export function WebTrailer({ ytKey, muted, onPlaying, onError }: Props) {
   const frame = useRef<HTMLIFrameElement | null>(null);
@@ -72,8 +74,7 @@ export function WebTrailer({ ytKey, muted, onPlaying, onError }: Props) {
       position: 'absolute',
       top: '50%',
       left: '50%',
-      height: '100%',
-      minWidth: '100%',
+      width: `${TRAILER_ZOOM * 100}%`,
       aspectRatio: '16 / 9',
       transform: 'translate(-50%, -50%)',
       border: 'none',
