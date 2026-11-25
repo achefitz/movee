@@ -245,3 +245,4 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 9. Watchlist and Watched are stored on the server and load on any device (`/api/recs/library`, removals via `/api/recs/hide` + `recs_interactions.hidden`); "Seen" saves before the rating prompt.
 10. Trailer shown as a 2:1 strip instead of cropped to fill; less top padding on web Discover; tapping any title (Watchlist, Profile lists, user profiles, activity feed) opens its details.
 11. Search tab: find any movie/show, add to Watchlist or mark Seen; search adds and opened results feed the recommender with extra weight.
+12. TMDB rating removed from the UI. Watch parties rebuilt: invite → accept → shared 30-title deck from both profiles on chosen services → swipe → matches.

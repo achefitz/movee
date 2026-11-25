@@ -31,7 +31,8 @@ interface SwipeCardProps {
   isTop: boolean;
   onSwipeRight: () => void;
   onSwipeLeft: () => void;
-  onSwipeUp: () => void;
+  /** Swipe up = "seen it". Leave out to allow only left/right (e.g. watch parties). */
+  onSwipeUp?: () => void;
   onPress: () => void;
   /** Trailer sound, shared across cards (TikTok-style: unmute once, stays unmuted). */
   muted: boolean;
@@ -75,7 +76,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
     Animated.timing(position, { toValue, duration: 220, useNativeDriver: false }).start(() => {
       if (dir === 'right') cb.current.onSwipeRight();
       else if (dir === 'left') cb.current.onSwipeLeft();
-      else cb.current.onSwipeUp();
+      else cb.current.onSwipeUp?.();
     });
   };
 
@@ -114,7 +115,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
           forceSwipe('right');
         } else if (g.dx < -SWIPE_H || (g.vx < -FLICK_VX && g.dx < -FLICK_MIN_DX)) {
           forceSwipe('left');
-        } else if (g.dy < -SWIPE_V || (g.vy < -FLICK_VX && g.dy < -FLICK_MIN_DX * 2)) {
+        } else if (cb.current.onSwipeUp && (g.dy < -SWIPE_V || (g.vy < -FLICK_VX && g.dy < -FLICK_MIN_DX * 2))) {
           forceSwipe('up');
         } else {
           resetPosition();
@@ -158,7 +159,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
         forceSwipe('right');
       } else if (dx < -SWIPE_H) {
         forceSwipe('left');
-      } else if (dy < -SWIPE_V) {
+      } else if (cb.current.onSwipeUp && dy < -SWIPE_V) {
         forceSwipe('up');
       } else {
         resetPosition();
@@ -190,7 +191,9 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
 
   const likeOpacity = position.x.interpolate({ inputRange: [0, W / 4], outputRange: [0, 1], extrapolate: 'clamp' });
   const nopeOpacity = position.x.interpolate({ inputRange: [-W / 4, 0], outputRange: [1, 0], extrapolate: 'clamp' });
-  const watchedOpacity = position.y.interpolate({ inputRange: [-H / 5, 0], outputRange: [1, 0], extrapolate: 'clamp' });
+  const watchedOpacity = onSwipeUp
+    ? position.y.interpolate({ inputRange: [-H / 5, 0], outputRange: [1, 0], extrapolate: 'clamp' })
+    : 0;
 
   // Autoplay the top card's trailer; the poster stays until the video is really playing.
   const playTrailer = isTop && !!trailerKey && !trailerError && !stopped;

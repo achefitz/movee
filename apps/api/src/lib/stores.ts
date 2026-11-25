@@ -2,9 +2,11 @@ import { createMemoryAuthStore, createPgAuthStore, type AuthStore } from '../aut
 import { RecsService } from '../recsys/service';
 import { createMemoryStore, createPgStore } from '../recsys/store';
 import { logger } from './logger';
+import { createMemoryPartyStore, createPgPartyStore, type PartyStore } from '../parties/store';
 
 let authPromise: Promise<AuthStore> | null = null;
 let recsPromise: Promise<RecsService> | null = null;
+let partyPromise: Promise<PartyStore> | null = null;
 
 const usePg = () => !!process.env.DATABASE_URL;
 
@@ -29,4 +31,12 @@ export function getRecsService(): Promise<RecsService> {
     recsPromise.catch(() => { recsPromise = null; }); // retry init on next request
   }
   return recsPromise;
+}
+
+export function getPartyStore(): Promise<PartyStore> {
+  if (!partyPromise) {
+    partyPromise = usePg() ? createPgPartyStore() : Promise.resolve(createMemoryPartyStore());
+    partyPromise.catch(() => { partyPromise = null; });
+  }
+  return partyPromise;
 }

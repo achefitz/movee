@@ -33,6 +33,9 @@ const RT_WAIT_MS = 2500;
 const LIBRARY_LIMIT = 2000;
 const SEARCH_CLICKS_USED = 30;
 const SEARCH_LIFT = 0.25;
+export const PARTY_DECK_SIZE = 30;
+/** Score multiplier by how many of the two have the title on their Watchlist. */
+const PARTY_WATCHLIST_BONUS = [1, 1.35, 1.8];
 const SEARCH_LIFT_HALF_LIFE = 14 * 24 * 3600_000;
 type MediaItem = ReturnType<typeof toMediaItem>;
 const BAYES_IDX = featureIndex('item_bayes_rating');
@@ -361,6 +364,88 @@ export class RecsService {
 
   async hide(userId: string, key: string) {
     await this.store.setHidden(userId, key, true);
+  }
+
+  /**
+   * A watch party deck for two people: titles on either Watchlist first (both = best), then
+   * candidates retrieved for either person, each scored with both taste profiles and combined
+   * with a geometric mean so a title has to suit both. Nothing either has watched or skipped.
+   * Restricted to the party's type and streaming services, genre-diversified.
+   */
+  async partyDeck(
+    a: { id: string; favoriteGenres: number[] },
+    b: { id: string; favoriteGenres: number[] },
+    mediaType: 'movie' | 'tv',
+    providers: number[],
+    size = PARTY_DECK_SIZE,
+  ): Promise<string[]> {
+    const now = Date.now();
+    const f: DeckFilters = { ...DEFAULT_FILTERS, contentType: mediaType, streaming: providers };
+    const [ha, hb] = await Promise.all([this.store.getUserInteractions(a.id), this.store.getUserInteractions(b.id)]);
+    const histItems = await this.catalog.getItems([...ha.slice(-300), ...hb.slice(-300)].map(h => h.itemKey));
+    const pa = buildProfile(a.id, ha, histItems, a.favoriteGenres);
+    const pb = buildProfile(b.id, hb, histItems, b.favoriteGenres);
+
+    // Watched or skipped by either: out. Liked (on a Watchlist): in, and favoured.
+    const out = new Set<string>();
+    const liked = new Map<string, number>(); // key → how many of the two saved it
+    for (const h of [...ha, ...hb]) {
+      if (h.action === 'like' && !h.hidden) liked.set(h.itemKey, (liked.get(h.itemKey) ?? 0) + 1);
+      else out.add(h.itemKey);
+    }
+
+    const [pools, i2i] = await Promise.all([
+      this.catalog.getPools(f, now),
+      this.catalog.getI2I([...pa.recentPositives.slice(0, 6), ...pb.recentPositives.slice(0, 6)]),
+    ]);
+    const poolKeys = new Set([...pools.popular, ...pools.topRated, ...pools.explore]);
+    const catalogPool: CatalogItem[] = [];
+    for (const it of this.catalog.known.values()) {
+      if (matchesFilters(it, f, now) === 'yes') catalogPool.push(it);
+      if (catalogPool.length >= CONTENT_POOL_MAX) break;
+    }
+    const cands = new Map<string, Candidate>();
+    for (const p of [pa, pb]) {
+      for (const [k, c] of generateCandidates(p, this.stats, { ...pools, i2i, catalogPool })) {
+        const prev = cands.get(k);
+        cands.set(k, prev ? { ...prev, sources: { ...c.sources, ...prev.sources } } : c);
+      }
+    }
+    for (const k of liked.keys()) if (!cands.has(k)) cands.set(k, { key: k, sources: {} });
+    for (const k of out) cands.delete(k);
+
+    const combine = async (keys: Map<string, Candidate>, keep: (it: CatalogItem) => boolean, items: Map<string, CatalogItem>) => {
+      const sa = new Map(scoreCandidates(keys, items, keep, pa, this.stats, this.model, now).map(s => [s.item.key, s]));
+      return scoreCandidates(keys, items, keep, pb, this.stats, this.model, now).flatMap(sb => {
+        const s1 = sa.get(sb.item.key);
+        if (!s1) return [];
+        const both = Math.sqrt(s1.score * sb.score) * (PARTY_WATCHLIST_BONUS[liked.get(sb.item.key) ?? 0] ?? 1);
+        return [{ ...sb, score: both }];
+      });
+    };
+
+    const items = await this.catalog.getItems([...cands.keys()]);
+    const first = (await combine(cands, it => matchesFilters(it, f, now) !== 'no', items))
+      .sort((x, y) => y.score - x.score)
+      .slice(0, size * 3);
+    // Exact streaming/type check needs provider lists: enrich the shortlist, then rescore.
+    const enriched = await this.catalog.enrich(first.map(s => s.item), now);
+    const shortlist = new Map(first.map(s => [s.item.key, s.cand]));
+    const keep = (it: CatalogItem) => {
+      const m = matchesFilters(it, f, now);
+      return m === 'yes' || (m === 'unknown' && poolKeys.has(it.key));
+    };
+    const second = await combine(shortlist, keep, enriched);
+    const novel = noveltyTest(pa);
+    return rerank(second, Math.min(pa.n, pb.n), size, it => novel(it) && noveltyTest(pb)(it)).map(s => s.item.key);
+  }
+
+  /** Catalog items for a stored party deck, in deck order, with fresh ratings. */
+  async partyItems(keys: string[]) {
+    const got = await this.catalog.getItems(keys);
+    const items = keys.flatMap(k => got.get(k) ?? []);
+    await this.refreshRottenTomatoes(items);
+    return items.map(it => toMediaItem(this.catalog.known.get(it.key) ?? it));
   }
 
   /** Movies and shows matching `query` (TMDB search), with the user's own status on each. */

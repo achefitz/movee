@@ -524,6 +524,76 @@ try {
   assert.ok(srDeck.some(i => i.reason === `Because you liked Movie ${sq.id}`), 'deck should build on the title added from search');
   ok('the next deck builds on what you added from search');
 
+  // 18. Watch parties
+  {
+    const P = `${root}/parties`;
+    const hostT = await tokenFor('party_host'), guestT = await tokenFor('party_guest'), strangerT = await tokenFor('party_stranger');
+    const FF = `${root}/follows`;
+    const deny = await call('POST', P, { username: 'party_guest', mediaType: 'movie', providers: [8] }, hostT);
+    assert.equal(deny.status, 403, 'invite without a follow should be refused');
+    await call('POST', FF, { username: 'party_guest' }, hostT);
+    // Taste: host saved a few titles, guest saved one of the same; guest skipped one, host watched one.
+    const movies = fakes.filter(f => f.type === 'movie');
+    const pool = (await post('/deck', { userId: 'party_host', filters: { contentType: 'movie' }, limit: 12 })).body.items.map((i: any) => i.key) as string[];
+    const [shared, hostOnly, skipped, watched] = pool;
+    for (const k of [shared, hostOnly]) await call('POST', `${base}/feedback`, { key: k, action: 'like' }, hostT);
+    await call('POST', `${base}/feedback`, { key: shared, action: 'like' }, guestT);
+    await call('POST', `${base}/feedback`, { key: skipped, action: 'skip' }, guestT);
+    await call('POST', `${base}/feedback`, { key: watched, action: 'seen_up' }, hostT);
+    const providerOf = (k: string) => movies.find(f => `movie:${f.id}` === k)!.providers;
+    const hostProv = providerOf(shared).slice(0, 1);
+    const old = (await call('POST', P, { username: 'party_guest', mediaType: 'movie', providers: hostProv }, hostT)).body.party;
+    const created = await call('POST', P, { username: '@party_guest', mediaType: 'movie', providers: hostProv }, hostT);
+    assert.equal(created.status, 201);
+    const id = created.body.party.id;
+    const guestList = (await call('GET', P, undefined, guestT)).body.parties as any[];
+    assert.ok(guestList.some(p => p.id === id && p.status === 'pending' && p.role === 'guest' && p.with === '@party_host'));
+    assert.ok(!guestList.some(p => p.id === old.id && p.status === 'pending'), 'older invite should be replaced');
+    assert.equal((await call('GET', `${P}/${id}`, undefined, strangerT)).status, 404);
+    assert.equal((await call('POST', `${P}/${id}/accept`, {}, hostT)).status, 404, 'host cannot accept own invite');
+    ok('invites need a follow, show up for the guest, replace older ones, and stay private');
+
+    const guestProv = movies.map(f => f.providers[0]).find(x => x && !hostProv.includes(x))!;
+    const acc = await call('POST', `${P}/${id}/accept`, { providers: [guestProv] }, guestT);
+    assert.equal(acc.status, 200, JSON.stringify(acc.body));
+    assert.equal(acc.body.party.status, 'active');
+    assert.deepEqual([...acc.body.party.providers].sort(), [...hostProv, guestProv].sort());
+    const view = (await call('GET', `${P}/${id}`, undefined, guestT)).body;
+    const keys = view.items.map((i: any) => `${i.type}:${i.id}`) as string[];
+    assert.equal(keys.length, 30, `deck size ${keys.length}`);
+    assert.equal(new Set(keys).size, 30);
+    assert.ok(view.items.every((i: any) => i.type === 'movie'));
+    assert.ok(view.items.every((i: any) => i.streamingIds.some((x: number) => [...hostProv, guestProv].includes(x))), 'title not on the chosen services');
+    assert.ok(!keys.includes(skipped) && !keys.includes(watched), 'skipped/watched titles must be left out');
+    if (providerOf(shared).some(x => [...hostProv, guestProv].includes(x))) {
+      assert.ok(keys.indexOf(shared) >= 0 && keys.indexOf(shared) < 5, `title on both watchlists should lead (at ${keys.indexOf(shared)})`);
+    }
+    const hostView = (await call('GET', `${P}/${id}`, undefined, hostT)).body;
+    assert.deepEqual(hostView.items.map((i: any) => `${i.type}:${i.id}`), keys, 'both see the same deck');
+    ok(`accepting builds one 30-title deck from both profiles (only chosen services, no watched/skipped; shared watchlist pick at #${keys.indexOf(shared) + 1})`);
+
+    const v = (t: string, key: string, vote: string) => call('POST', `${P}/${id}/vote`, { key, vote }, t);
+    assert.equal((await v(hostT, keys[0], 'yes')).body.match, false);
+    assert.equal((await v(guestT, keys[0], 'yes')).body.match, true);
+    assert.equal((await v(guestT, keys[1], 'yes')).body.match, false);
+    assert.equal((await v(hostT, keys[1], 'no')).body.match, false);
+    assert.equal((await v(hostT, 'movie:1', 'yes')).status, 400);
+    assert.equal((await v(strangerT, keys[2], 'yes')).status, 404);
+    for (const k of keys.slice(2)) { await v(hostT, k, 'no'); }
+    let last: any;
+    for (const k of keys.slice(2)) last = (await v(guestT, k, 'no')).body;
+    assert.equal(last.party.status, 'done');
+    assert.deepEqual(last.party.matches, [keys[0]]);
+    assert.equal(last.party.myProgress, 30); assert.equal(last.party.theirProgress, 30);
+    ok("swiping: both yes = match (shown at once); only matches are revealed; done when both finish");
+
+    const p2 = (await call('POST', P, { username: 'party_host', mediaType: 'tv', providers: [8] }, guestT)).body.party;
+    assert.equal((await call('POST', `${P}/${p2.id}/decline`, {}, hostT)).status, 200);
+    assert.ok(!(await call('GET', P, undefined, guestT)).body.parties.some((p: any) => p.id === p2.id));
+    assert.equal((await call('POST', `${P}/${p2.id}/accept`, {}, hostT)).status, 409);
+    ok('either side can invite; declined invites disappear');
+  }
+
   // 13. Varied first decks + onboarding "show more"
   const firsts = await Promise.all(['fresh_a', 'fresh_b', 'fresh_c'].map(async n => (await post('/deck', { userId: n, limit: 15 })).body.items.map((i: any) => i.key) as string[]));
   const overlap = (a: string[], b: string[]) => a.filter(k => b.includes(k)).length / a.length;

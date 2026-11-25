@@ -113,6 +113,16 @@ open items) is `docs/HANDOFF.md`.
   genre like and seed retrieval first; opened results nudge taste at half weight without counting as
   seen; neighbours of searched titles get `SEARCH_SEED_BOOST` in co-visitation/i2i and a score lift
   (`SEARCH_LIFT`, half-life 14 days) that is not a feature, so training data is unaffected.
+- **Watch parties** (`routes/parties.ts`, `parties/store.ts`, tables `watch_parties` + `watch_party_votes`):
+  host invites someone they follow or who follows them, picking Movies/TV and streaming services
+  (`components/WatchParties.tsx` in Social, prefilled from Discover's streaming filter). Guest accepts
+  (may add services; the host's stay) → `service.partyDeck()` builds one 30-title deck: both profiles,
+  candidates retrieved for either, each scored for both and combined by geometric mean, titles on
+  either Watchlist boosted (both = most), anything either watched/skipped left out, exact type +
+  streaming filter, genre re-rank. Both swipe it in `app/party/[id].tsx` (SwipeCard with trailers,
+  no swipe-up); both yes = match (shown at once). Only matches are revealed. Social polls every 6 s
+  (no push notifications). Party votes don't feed the personal recommender.
+- The TMDB rating is not shown anywhere (IMDb / Rotten Tomatoes only); the min-rating filter still uses it.
 - On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync
   of on-device history.
