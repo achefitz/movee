@@ -70,8 +70,7 @@ function MediaRow({
             <Text style={styles.typeBadgeText}>{item.type === 'movie' ? 'MOVIE' : 'TV'}</Text>
           </View>
           {item.year ? <Text style={styles.rowYear}>{item.year}</Text> : null}
-          <Ionicons name="star" size={12} color={Colors.accent} />
-          <Text style={styles.rowRating}>{item.rating.toFixed(1)}</Text>
+          {item.imdbRating ? <Text style={styles.rowRating}>IMDb {item.imdbRating.toFixed(1)}</Text> : null}
         </View>
         {item.genreNames.slice(0, 2).join(', ') ? (
           <Text style={styles.rowGenres} numberOfLines={1}>{item.genreNames.slice(0, 2).join(', ')}</Text>

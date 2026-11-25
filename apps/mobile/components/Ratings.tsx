@@ -14,8 +14,8 @@ export function compactCount(n: number): string {
 const open = (url?: string) => { if (url) Linking.openURL(url).catch(() => {}); };
 
 /**
- * IMDb and Rotten Tomatoes scores (TMDB when neither is known). Plain labels, not the
- * services' logos. `size="lg"` adds vote counts and the TMDB score, for the details sheet.
+ * IMDb and Rotten Tomatoes scores (nothing when neither is known). Plain labels, not the
+ * services' logos. `size="lg"` adds vote counts, for the details sheet.
  */
 export function Ratings({ item, size = 'sm', linked = false }: { item: MediaItem; size?: 'sm' | 'lg'; linked?: boolean }) {
   const lg = size === 'lg';
@@ -46,13 +46,6 @@ export function Ratings({ item, size = 'sm', linked = false }: { item: MediaItem
           <Text style={lg ? styles.emojiLg : styles.emoji}>{fresh ? '🍅' : '🥀'}</Text>
           <Text style={[styles.value, lg && styles.valueLg, { color: fresh ? '#FF6B5B' : '#7BC67B' }]}>{item.rtScore}%</Text>
         </Wrap>
-      )}
-      {(lg || (!hasImdb && !hasRt)) && item.rating > 0 && (
-        <View accessibilityLabel={`TMDB ${item.rating.toFixed(1)} out of 10`} style={[styles.pill, lg && styles.pillLg, styles.tmdb]}>
-          <Ionicons name="star" size={lg ? 13 : 12} color={Colors.accent} />
-          <Text style={[styles.value, lg && styles.valueLg]}>{item.rating.toFixed(1)}</Text>
-          <Text style={styles.sub}>TMDB</Text>
-        </View>
       )}
     </View>
   );

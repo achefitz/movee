@@ -147,12 +147,7 @@ export default function SearchScreen() {
                         <Text style={styles.typeText}>{item.type === 'movie' ? 'MOVIE' : 'TV'}</Text>
                       </View>
                       {item.year ? <Text style={styles.metaText}>{item.year}</Text> : null}
-                      {item.rating > 0 ? (
-                        <>
-                          <Ionicons name="star" size={11} color={Colors.accent} />
-                          <Text style={styles.metaText}>{item.rating.toFixed(1)}</Text>
-                        </>
-                      ) : null}
+                      {item.imdbRating ? <Text style={styles.metaText}>IMDb {item.imdbRating.toFixed(1)}</Text> : null}
                     </View>
                     {item.genreNames.length > 0 ? (
                       <Text style={styles.genres} numberOfLines={1}>{item.genreNames.slice(0, 2).join(', ')}</Text>
