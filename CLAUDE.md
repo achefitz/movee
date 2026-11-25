@@ -105,6 +105,14 @@ open items) is `docs/HANDOFF.md`.
 - Tapping a title anywhere (Watchlist rows, `TitleGrid` in Profile lists and user profiles, the
   Social activity feed) opens `MediaDetailModal`; render it inside any parent `Modal` so it stacks.
   Your own activity feed is rebuilt from `/api/recs/library` like the lists.
+- **Search tab** (`app/(tabs)/search.tsx`): `GET /api/recs/search?q=` (TMDB `/search/multi`, people dropped,
+  cached 10 min, `catalog.search`). Bookmark = add to Watchlist, double-check = Seen (toggles); both go
+  through `addFromSearch` → `/feedback` with `source: 'search'` (`recs_interactions.source`). Opening a
+  result logs `POST /api/recs/search/click` (`recs_search_clicks`). Upweighting (`profile.ts`,
+  `candidates.ts`, `service.ts`): search adds weigh `SEARCH_BOOST`× in the taste profile plus an extra
+  genre like and seed retrieval first; opened results nudge taste at half weight without counting as
+  seen; neighbours of searched titles get `SEARCH_SEED_BOOST` in co-visitation/i2i and a score lift
+  (`SEARCH_LIFT`, half-life 14 days) that is not a feature, so training data is unaffected.
 - On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync
   of on-device history.

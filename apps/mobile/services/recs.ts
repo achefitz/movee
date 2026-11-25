@@ -39,7 +39,7 @@ export async function fetchDeck(
 // The queue belongs to the signed-in account and is cleared on logout.
 
 type Pending =
-  | { kind: 'feedback'; key: string; action: SwipeAction; impressionId?: string | null }
+  | { kind: 'feedback'; key: string; action: SwipeAction; impressionId?: string | null; source?: 'deck' | 'search' }
   | { kind: 'undo'; key: string }
   | { kind: 'hide'; key: string };
 
@@ -68,7 +68,9 @@ async function flush() {
       const next = queue[0];
       try {
         if (next.kind === 'feedback') {
-          await apiFetch('/api/recs/feedback', { body: { key: next.key, action: next.action, impressionId: next.impressionId ?? null } });
+          await apiFetch('/api/recs/feedback', {
+            body: { key: next.key, action: next.action, impressionId: next.impressionId ?? null, source: next.source ?? 'deck' },
+          });
         } else if (next.kind === 'hide') {
           await apiFetch('/api/recs/hide', { body: { key: next.key } });
         } else {
@@ -102,6 +104,23 @@ function enqueue(p: Pending) {
 
 export function sendFeedback(item: MediaItem, action: SwipeAction) {
   enqueue({ kind: 'feedback', key: keyOf(item), action, impressionId: item.impressionId ?? null });
+}
+
+/** A title added from the Search tab: the server weighs these more when learning your taste. */
+export function sendSearchFeedback(item: MediaItem, action: 'like' | 'seen') {
+  enqueue({ kind: 'feedback', key: keyOf(item), action, source: 'search' });
+}
+
+export type SearchResult = MediaItem & { myStatus: 'saved' | 'watched' | null };
+
+export async function searchTitles(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const { items } = await apiFetch<{ items: SearchResult[] }>(`/api/recs/search?q=${encodeURIComponent(query)}`, { signal });
+  return items;
+}
+
+/** Opening a search result is a light interest signal for recommendations. Best effort. */
+export function logSearchClick(item: MediaItem, query: string) {
+  apiFetch('/api/recs/search/click', { body: { key: keyOf(item), query: query.slice(0, 100) } }).catch(() => {});
 }
 
 export function sendUndo(item: MediaItem) {

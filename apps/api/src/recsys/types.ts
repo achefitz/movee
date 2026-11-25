@@ -41,7 +41,14 @@ export type Interaction = {
   ts: number;
   /** Removed from the user's lists; still a swipe for the recommender. */
   hidden?: boolean;
+  /** 'search' = added from the Search tab (weighted up in the taste profile). Default 'deck'. */
+  source?: InteractionSource;
 };
+
+export type InteractionSource = 'deck' | 'search';
+
+/** A search result the user opened. */
+export type SearchClick = { userId: string; query: string; itemKey: string; ts: number };
 
 export type Era = 'all' | 'new' | 'classic';
 

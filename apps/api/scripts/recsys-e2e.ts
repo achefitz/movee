@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { mulberry32 } from '../src/recsys/gbdt';
 import { CLASSIC_BEFORE, newReleaseCutoff } from '../src/recsys/filters';
+import { buildProfile, SEARCH_BOOST } from '../src/recsys/profile';
 
 delete process.env.DATABASE_URL;
 process.env.TMDB_API_KEY = 'fake';
@@ -94,6 +95,14 @@ globalThis.fetch = (async (input: any, init?: any) => {
     r.sort((a, b) => q.get('sort_by') === 'vote_average.desc' ? b.vote - a.vote : b.pop - a.pop);
     const page = Number(q.get('page') ?? 1);
     return json({ page, results: r.slice((page - 1) * 20, page * 20).map(list) });
+  }
+  if (p === '/search/multi') {
+    // "Movie 12" / "Show 7"; a query matches titles containing it, plus a person to be ignored.
+    const query = (q.get('query') ?? '').toLowerCase();
+    const page = Number(q.get('page') ?? 1);
+    const hits = fakes.filter(f => (f.type === 'movie' ? `movie ${f.id}` : `show ${f.id}`).includes(query));
+    const results = [{ id: 999999, media_type: 'person', name: 'Somebody' }, ...hits.map(f => ({ ...list(f), media_type: f.type }))];
+    return json({ page, results: results.slice((page - 1) * 20, page * 20) });
   }
   m = p.match(/^\/(movie|tv)\/(\d+)\/recommendations$/);
   if (m) {
@@ -470,6 +479,50 @@ try {
   await call('POST', `${base}/feedback`, { key: l1, action: 'like' }, libT);
   assert.ok((await call('GET', `${base}/library`, undefined, libT)).body.liked.some((i: any) => keyOf(i) === l1));
   ok('removing hides a title everywhere but keeps the swipe; liking it again brings it back');
+
+  // 17. Search: find titles, add them, and let search weigh more in the taste profile
+  const srT = await tokenFor('searcher');
+  const sq = fakes.find(f => f.type === 'movie')!;
+  const sr = (await call('GET', `${base}/search?q=${encodeURIComponent(`movie ${sq.id}`)}`, undefined, srT)).body.items as any[];
+  assert.ok(sr.length > 0 && sr.every(i => i.type === 'movie' || i.type === 'tv'), 'search returned people or nothing');
+  assert.equal(`${sr[0].type}:${sr[0].id}`, `movie:${sq.id}`);
+  assert.equal(sr[0].myStatus, null);
+  assert.equal((await call('GET', `${base}/search?q=a`, undefined, srT)).body.items.length, 0);
+  assert.equal((await call('GET', `${base}/search?q=movie`)).status, 401);
+  ok(`search finds titles by name (${sr.length} hits, people dropped, needs sign-in)`);
+  await call('POST', `${base}/search/click`, { key: `movie:${sq.id}`, query: `movie ${sq.id}` }, srT);
+  await call('POST', `${base}/feedback`, { key: `movie:${sq.id}`, action: 'like', source: 'search' }, srT);
+  const sr2 = (await call('GET', `${base}/search?q=${encodeURIComponent(`movie ${sq.id}`)}`, undefined, srT)).body.items as any[];
+  assert.equal(sr2[0].myStatus, 'saved');
+  assert.ok((await call('GET', `${base}/library`, undefined, srT)).body.liked.some((i: any) => i.id === sq.id));
+  assert.equal((await call('POST', `${base}/feedback`, { key: `movie:${sq.id}`, action: 'like', source: 'bogus' }, srT)).status, 400);
+  ok('adding from search saves to the watchlist and shows as saved in results');
+
+  {
+    // Same history, once from Discover and once from Search: search moves the profile more.
+    const now = Date.now();
+    const [a, b] = fakes.filter(f => f.type === 'movie' && f.genres[0] !== fakes[0].genres[0]).slice(0, 2);
+    const items = new Map<string, any>([a, b].map(f => [`movie:${f.id}`, {
+      key: `movie:${f.id}`, id: f.id, type: 'movie', title: 'x', genres: f.genres, releaseDate: f.date,
+      voteAverage: f.vote, voteCount: f.votes, popularity: f.pop, language: 'en', keywords: f.kw, cast: [],
+    }]));
+    const hist = (src: 'deck' | 'search') => [
+      { userId: 'u', itemKey: `movie:${a.id}`, action: 'like' as const, ts: now - 2, source: src },
+      { userId: 'u', itemKey: `movie:${b.id}`, action: 'like' as const, ts: now - 1 },
+    ];
+    const deckP = buildProfile('u', hist('deck'), items), searchP = buildProfile('u', hist('search'), items);
+    const g = a.genres.find(x => !b.genres.includes(x)) ?? a.genres[0];
+    assert.equal(deckP.recentPositives[0], `movie:${b.id}`);
+    assert.equal(searchP.recentPositives[0], `movie:${a.id}`, 'search add should seed retrieval first');
+    assert.ok(searchP.genre.get(g)!.pos > deckP.genre.get(g)!.pos);
+    assert.ok((searchP.tasteVec.get(`g:${g}`) ?? 0) > (deckP.tasteVec.get(`g:${g}`) ?? 0));
+    const clickP = buildProfile('u', hist('deck').slice(1), items, [], [{ userId: 'u', query: 'x', itemKey: `movie:${a.id}`, ts: now }]);
+    assert.ok(clickP.recentPositives.includes(`movie:${a.id}`) && !clickP.seen.has(`movie:${a.id}`));
+    ok(`search adds weigh ${SEARCH_BOOST}x and seed recs first; opened results nudge taste without counting as seen`);
+  }
+  const srDeck = (await post('/deck', { userId: 'searcher', limit: 20 })).body.items as any[];
+  assert.ok(srDeck.some(i => i.reason === `Because you liked Movie ${sq.id}`), 'deck should build on the title added from search');
+  ok('the next deck builds on what you added from search');
 
   // 13. Varied first decks + onboarding "show more"
   const firsts = await Promise.all(['fresh_a', 'fresh_b', 'fresh_c'].map(async n => (await post('/deck', { userId: n, limit: 15 })).body.items.map((i: any) => i.key) as string[]));

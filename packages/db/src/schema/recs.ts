@@ -18,12 +18,28 @@ export const recsInteractions = pgTable(
     impressionId: text("impression_id"),
     // Removed from the user's Watchlist / Watched list. The swipe still counts for recommendations.
     hidden: boolean("hidden").default(false).notNull(),
+    // Where the swipe came from: 'deck' (Discover) or 'search' (added from the Search tab,
+    // a deliberate pick that the taste profile weighs more).
+    source: text("source").default("deck").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     uniqueIndex("recs_interactions_user_item").on(t.userId, t.itemKey),
     index("recs_interactions_created").on(t.createdAt),
   ],
+);
+
+/** Search results the user opened (without necessarily adding them): a light interest signal. */
+export const recsSearchClicks = pgTable(
+  "recs_search_clicks",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    query: text("query").notNull(),
+    itemKey: text("item_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("recs_search_clicks_user").on(t.userId, t.createdAt)],
 );
 
 /**

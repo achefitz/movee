@@ -31,7 +31,13 @@ const DeckBody = z.object({
   exclude: z.array(Key).max(300).default([]),
   limit: z.number().int().min(1).max(40).default(20),
 });
-const FeedbackBody = z.object({ key: Key, action: ActionSchema, impressionId: z.string().uuid().nullish() });
+const FeedbackBody = z.object({
+  key: Key,
+  action: ActionSchema,
+  impressionId: z.string().uuid().nullish(),
+  source: z.enum(['deck', 'search']).default('deck'),
+});
+const SearchClickBody = z.object({ key: Key, query: z.string().min(1).max(100) });
 const UndoBody = z.object({ key: Key });
 const SyncBody = z.object({
   entries: z.array(z.object({ key: Key, action: ActionSchema })).max(3000),
@@ -60,12 +66,30 @@ router.post('/deck', handle(DeckBody, async (b, svc, userId, user) => ({
 })));
 
 router.post('/feedback', handle(FeedbackBody, async (b, svc, userId) => {
-  await svc.feedback(userId, b.key, b.action, b.impressionId ?? null);
+  await svc.feedback(userId, b.key, b.action, b.impressionId ?? null, b.source);
   return { ok: true };
 }));
 
 router.post('/undo', handle(UndoBody, async (b, svc, userId) => {
   await svc.undo(userId, b.key);
+  return { ok: true };
+}));
+
+router.get('/search', async (req, res) => {
+  const q = String(req.query.q ?? '').slice(0, 100);
+  if (q.trim().length < 2) return void res.json({ items: [] });
+  try {
+    const svc = await getRecsService();
+    res.set('Cache-Control', 'no-store');
+    res.json({ items: await svc.search(req.user!.id, q) });
+  } catch (err: any) {
+    logger.error({ err: err.message }, 'search failed');
+    res.status(err.message?.includes('TMDB credentials') ? 503 : 500).json({ error: 'Search failed' });
+  }
+});
+
+router.post('/search/click', handle(SearchClickBody, async (b, svc, userId) => {
+  await svc.searchClick(userId, b.query, b.key);
   return { ok: true };
 }));
 

@@ -1,4 +1,4 @@
-import { labelOf, weightOf, yearOf, type CatalogItem, type Interaction } from './types';
+import { labelOf, weightOf, yearOf, type CatalogItem, type Interaction, type SearchClick } from './types';
 
 export type SparseVec = Map<string, number>;
 
@@ -78,6 +78,11 @@ export type UserProfile = {
   likedVecs: SparseVec[];
   skippedVecs: SparseVec[];
   recentPositives: string[]; // newest first
+  /**
+   * Titles added (strength 1) or only opened (0.5) from Search, with when. What they
+   * pull in gets boosted in retrieval and ranking.
+   */
+  searchSeeds: Map<string, { at: number; strength: number }>;
   meanLikedRating: number | null;
   meanLikedLogVotes: number | null;
   seen: Set<string>;
@@ -87,12 +92,24 @@ const DECAY = 0.97;
 const FAVORITE_GENRE_PSEUDO_LIKES = 2;
 const FAVORITE_GENRE_TASTE_WEIGHT = 1.5; // per interaction; older swipes fade but never vanish
 const MAX_SIM_VECS = 40;
+/**
+ * Search is deliberate: someone looked a title up by name. Titles added from Search count
+ * SEARCH_BOOST× in the taste profile, add an extra genre like, and seed "more like this"
+ * retrieval ahead of Discover likes. Search results merely opened are a lighter signal.
+ */
+export const SEARCH_BOOST = 2;
+const SEARCH_SEEDS = 8;
+const CLICK_WEIGHT = 0.5;
+const CLICK_DECAY = 0.9;
+const CLICK_SEEDS = 4;
+const CLICK_STRENGTH = 0.5;
 
 export function buildProfile(
   userId: string,
   interactions: Interaction[],
   items: Map<string, CatalogItem>,
   favoriteGenres: number[] = [],
+  searchClicks: SearchClick[] = [], // newest first; their items must be in `items`
 ): UserProfile {
   const hist = [...interactions].sort((a, b) => a.ts - b.ts);
   const genre: RateCounter = new Map();
@@ -105,6 +122,8 @@ export function buildProfile(
   const likedVecs: SparseVec[] = [];
   const skippedVecs: SparseVec[] = [];
   const recentPositives: string[] = [];
+  const searchPositives: string[] = [];
+  const searchSeeds = new Map<string, { at: number; strength: number }>();
   let pos = 0, movies = 0, ratingSum = 0, ratingN = 0, votesSum = 0, votesN = 0;
 
   hist.forEach((it, idx) => {
@@ -114,9 +133,13 @@ export function buildProfile(
     if (!item) return;
     if (item.type === 'movie') movies++;
     const age = hist.length - 1 - idx;
-    const w = weightOf(it.action) * Math.pow(DECAY, age);
+    const fromSearch = it.source === 'search';
+    const w = weightOf(it.action) * Math.pow(DECAY, age) * (fromSearch ? SEARCH_BOOST : 1);
 
-    for (const g of canonicalGenres(item)) count(genre, g, y);
+    for (const g of canonicalGenres(item)) {
+      count(genre, g, y);
+      if (fromSearch && y === 1) count(genre, g, 1);
+    }
     const dec = decadeOf(item);
     if (dec != null) count(decade, dec, y);
     count(type, item.type, y);
@@ -126,7 +149,8 @@ export function buildProfile(
 
     if (y === 1) {
       likedVecs.push(vec);
-      recentPositives.unshift(it.itemKey);
+      (fromSearch ? searchPositives : recentPositives).unshift(it.itemKey);
+      if (fromSearch) searchSeeds.set(it.itemKey, { at: it.ts, strength: 1 });
       for (const p of item.providers ?? []) providerLikes.set(p, (providerLikes.get(p) ?? 0) + 1);
       for (const k of item.keywords ?? []) keywordW.set(k, (keywordW.get(k) ?? 0) + w);
       for (const c of item.cast ?? []) castW.set(c, (castW.get(c) ?? 0) + w);
@@ -136,6 +160,23 @@ export function buildProfile(
       skippedVecs.push(vec);
       for (const k of item.keywords ?? []) keywordW.set(k, (keywordW.get(k) ?? 0) + w * 0.5);
       for (const c of item.cast ?? []) castW.set(c, (castW.get(c) ?? 0) + w * 0.5);
+    }
+  });
+
+  // Opened search results lean the taste vector their way and seed retrieval, but
+  // never count as likes (no genre like-rate, not "seen", can still be dealt).
+  const swiped = new Set(hist.map(h => h.itemKey));
+  const clickSeeds: string[] = [];
+  searchClicks.forEach((c, i) => {
+    const item = items.get(c.itemKey);
+    if (!item) return;
+    const w = CLICK_WEIGHT * Math.pow(CLICK_DECAY, i);
+    for (const [k, x] of itemVector(item)) tasteVec.set(k, (tasteVec.get(k) ?? 0) + w * x);
+    for (const k of item.keywords ?? []) keywordW.set(k, (keywordW.get(k) ?? 0) + w);
+    for (const ca of item.cast ?? []) castW.set(ca, (castW.get(ca) ?? 0) + w);
+    if (!swiped.has(c.itemKey) && !clickSeeds.includes(c.itemKey)) {
+      clickSeeds.push(c.itemKey);
+      if (!searchSeeds.has(c.itemKey)) searchSeeds.set(c.itemKey, { at: c.ts, strength: CLICK_STRENGTH });
     }
   });
 
@@ -155,7 +196,14 @@ export function buildProfile(
     tasteVec: normalise(tasteVec),
     likedVecs: likedVecs.slice(-MAX_SIM_VECS),
     skippedVecs: skippedVecs.slice(-MAX_SIM_VECS),
-    recentPositives,
+    // Retrieval seeds, most telling first: search adds, opened search results, then Discover likes.
+    recentPositives: [...new Set([
+      ...searchPositives.slice(0, SEARCH_SEEDS),
+      ...clickSeeds.slice(0, CLICK_SEEDS),
+      ...recentPositives,
+      ...searchPositives.slice(SEARCH_SEEDS),
+    ])],
+    searchSeeds,
     meanLikedRating: ratingN ? ratingSum / ratingN : null,
     meanLikedLogVotes: votesN ? votesSum / votesN : null,
     seen: new Set(hist.map(h => h.itemKey)),

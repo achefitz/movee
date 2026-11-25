@@ -1,4 +1,4 @@
-import { labelOf, type Action, type CatalogItem, type Interaction } from './types';
+import { labelOf, type Action, type CatalogItem, type Interaction, type InteractionSource, type SearchClick } from './types';
 import type { EnsembleModel, TrainingRow } from './ranker';
 
 export type ImpressionRow = {
@@ -17,6 +17,9 @@ export interface RecsStore {
   upsertInteraction(i: Interaction, impressionId: string | null): Promise<void>;
   deleteInteraction(userId: string, itemKey: string): Promise<void>;
   setHidden(userId: string, itemKey: string, hidden: boolean): Promise<void>;
+  logSearchClick(c: SearchClick): Promise<void>;
+  /** Newest first. */
+  getSearchClicks(userId: string, limit: number): Promise<SearchClick[]>;
   getItems(keys: string[]): Promise<Map<string, CatalogItem>>;
   getRecentItems(limit: number): Promise<CatalogItem[]>;
   upsertItems(items: CatalogItem[]): Promise<void>;
@@ -34,13 +37,14 @@ type Db = typeof import('@movee/db');
 
 export async function createPgStore(): Promise<RecsStore> {
   const {
-    db, recsInteractions: I, recsImpressions: P, recsMediaItems: M, recsModels: R,
+    db, recsInteractions: I, recsImpressions: P, recsMediaItems: M, recsModels: R, recsSearchClicks: SC,
     and, desc, eq, inArray, lt, sql,
   } = (await import('@movee/db')) as Db;
   const CHUNK = 500;
 
-  const toInteraction = (r: { userId: string; itemKey: string; action: string; hidden: boolean; createdAt: Date }): Interaction => ({
+  const toInteraction = (r: { userId: string; itemKey: string; action: string; hidden: boolean; source: string; createdAt: Date }): Interaction => ({
     userId: r.userId, itemKey: r.itemKey, action: r.action as Action, ts: r.createdAt.getTime(), hidden: r.hidden,
+    source: r.source as InteractionSource,
   });
 
   return {
@@ -54,10 +58,10 @@ export async function createPgStore(): Promise<RecsStore> {
     },
     async upsertInteraction(i, impressionId) {
       await db.insert(I)
-        .values({ userId: i.userId, itemKey: i.itemKey, action: i.action, impressionId, createdAt: new Date(i.ts) })
+        .values({ userId: i.userId, itemKey: i.itemKey, action: i.action, impressionId, source: i.source ?? 'deck', createdAt: new Date(i.ts) })
         .onConflictDoUpdate({
           target: [I.userId, I.itemKey],
-          set: { action: i.action, impressionId, hidden: false, createdAt: new Date(i.ts) },
+          set: { action: i.action, impressionId, hidden: false, source: i.source ?? 'deck', createdAt: new Date(i.ts) },
         });
     },
     async deleteInteraction(userId, itemKey) {
@@ -65,6 +69,13 @@ export async function createPgStore(): Promise<RecsStore> {
     },
     async setHidden(userId, itemKey, hidden) {
       await db.update(I).set({ hidden }).where(and(eq(I.userId, userId), eq(I.itemKey, itemKey)));
+    },
+    async logSearchClick(c) {
+      await db.insert(SC).values({ userId: c.userId, query: c.query, itemKey: c.itemKey, createdAt: new Date(c.ts) });
+    },
+    async getSearchClicks(userId, limit) {
+      const rows = await db.select().from(SC).where(eq(SC.userId, userId)).orderBy(desc(SC.createdAt)).limit(limit);
+      return rows.map(r => ({ userId: r.userId, query: r.query, itemKey: r.itemKey, ts: r.createdAt.getTime() }));
     },
     async getItems(keys) {
       const out = new Map<string, CatalogItem>();
@@ -138,6 +149,7 @@ export function createMemoryStore(): RecsStore {
   const items = new Map<string, { item: CatalogItem; at: number }>();
   const impressions = new Map<string, ImpressionRow & { at: number }>();
   const models: EnsembleModel[] = [];
+  const searchClicks: SearchClick[] = [];
   const k = (u: string, i: string) => `${u}\u0000${i}`;
 
   const training = (fv: number) => [...interactions.values()]
@@ -151,11 +163,15 @@ export function createMemoryStore(): RecsStore {
     async getAllInteractions(limit) {
       return [...interactions.values()].sort((a, b) => b.ts - a.ts).slice(0, limit);
     },
-    async upsertInteraction(i, impressionId) { interactions.set(k(i.userId, i.itemKey), { ...i, hidden: false, impressionId }); },
+    async upsertInteraction(i, impressionId) { interactions.set(k(i.userId, i.itemKey), { ...i, source: i.source ?? 'deck', hidden: false, impressionId }); },
     async deleteInteraction(userId, itemKey) { interactions.delete(k(userId, itemKey)); },
     async setHidden(userId, itemKey, hidden) {
       const cur = interactions.get(k(userId, itemKey));
       if (cur) interactions.set(k(userId, itemKey), { ...cur, hidden });
+    },
+    async logSearchClick(c) { searchClicks.push(c); if (searchClicks.length > 50000) searchClicks.shift(); },
+    async getSearchClicks(userId, limit) {
+      return searchClicks.filter(c => c.userId === userId).sort((a, b) => b.ts - a.ts).slice(0, limit);
     },
     async getItems(keys) {
       const out = new Map<string, CatalogItem>();

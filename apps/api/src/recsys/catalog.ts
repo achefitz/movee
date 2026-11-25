@@ -9,6 +9,7 @@ const REGION = 'US';
 const POOL_TTL = 30 * 60_000;
 const I2I_TTL = 24 * 3600_000;
 const DETAILS_TTL = 7 * 24 * 3600_000;
+const SEARCH_TTL = 10 * 60_000;
 // Discover window for the in-theaters filter; theaters.ts decides what actually counts.
 const THEATER_WINDOW_DAYS = NEW_RELEASE_RUN_DAYS;
 
@@ -116,6 +117,7 @@ export class Catalog {
   readonly known = new Map<string, CatalogItem>();
   private pools = new Map<string, { at: number; pools: Pools }>();
   private i2i = new Map<string, { at: number; keys: string[] }>();
+  private searches = new Map<string, { at: number; keys: string[] }>();
   private inflight = new Map<string, Promise<unknown>>();
 
   constructor(private store: RecsStore, private log: { warn: (o: object, m: string) => void }) {}
@@ -210,6 +212,29 @@ export class Catalog {
   }
 
   /** TMDB's own item→item recommendations, cached for a day. */
+  /** Movies and TV shows matching a title search (TMDB /search/multi, people dropped), best match first. */
+  async search(query: string): Promise<CatalogItem[]> {
+    const q = query.trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!q) return [];
+    const hit = this.searches.get(q);
+    const keys = hit && Date.now() - hit.at < SEARCH_TTL ? hit.keys : await this.once(`search:${q}`, async () => {
+      const pages = await Promise.all([1, 2].map(page =>
+        tmdbJson('/search/multi', { query: q, include_adult: 'false', language: 'en-US', page })
+          .catch(err => { this.log.warn({ err: err.message }, 'search failed'); return { results: [] }; })));
+      const items = pages.flatMap((d: any) => d.results ?? [])
+        .filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv')
+        .map((r: any) => fromListResult(r, r.media_type))
+        .filter(Boolean) as CatalogItem[];
+      await this.remember(items);
+      const ks = [...new Set(items.map(it => it.key))];
+      this.searches.set(q, { at: Date.now(), keys: ks });
+      if (this.searches.size > 2000) this.searches.delete(this.searches.keys().next().value!);
+      return ks;
+    });
+    const got = await this.getItems(keys);
+    return keys.flatMap(k => got.get(k) ?? []);
+  }
+
   async getI2I(keys: string[]): Promise<Map<string, string[]>> {
     const out = new Map<string, string[]>();
     const now = Date.now();

@@ -28,6 +28,10 @@ export type RetrievalInputs = {
 };
 
 const PER_SOURCE = 120;
+/** Neighbours of titles found through Search count this much more in co-visitation and i2i retrieval. */
+export const SEARCH_SEED_BOOST = 2;
+const searchBoost = (profile: UserProfile, seed: string) =>
+  1 + (SEARCH_SEED_BOOST - 1) * (profile.searchSeeds.get(seed)?.strength ?? 0);
 const RECENT_SEEDS = 25;
 
 export function generateCandidates(
@@ -63,7 +67,7 @@ export function generateCandidates(
     const because = new Map<string, string>();
     const best = new Map<string, number>();
     seeds.forEach((seed, age) => {
-      const recency = Math.pow(0.9, age);
+      const recency = Math.pow(0.9, age) * searchBoost(profile, seed);
       for (const [nb, w] of stats.covisit.get(seed) ?? []) {
         const s = w * recency;
         agg.set(nb, (agg.get(nb) ?? 0) + s);
@@ -79,7 +83,7 @@ export function generateCandidates(
     const because = new Map<string, string>();
     const best = new Map<string, number>();
     seeds.forEach((seed, age) => {
-      const recency = Math.pow(0.9, age);
+      const recency = Math.pow(0.9, age) * searchBoost(profile, seed);
       (inp.i2i.get(seed) ?? []).forEach((k, rank) => {
         const s = recency / (1 + rank * 0.25);
         agg.set(k, (agg.get(k) ?? 0) + s);

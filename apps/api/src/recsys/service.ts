@@ -13,7 +13,7 @@ import { buildProfile, canonicalGenres, noveltyTest } from './profile';
 import { MIN_TRAINING_ROWS, trainRanker, type EnsembleModel, type Ranker, type TrainReport, type TrainingRow } from './ranker';
 import { buildGlobalStats, emptyStats, type GlobalStats } from './stats';
 import type { RecsStore } from './store';
-import { DEFAULT_FILTERS, yearOf, type Action, type CatalogItem, type DeckFilters } from './types';
+import { DEFAULT_FILTERS, yearOf, type Action, type CatalogItem, type DeckFilters, type InteractionSource } from './types';
 
 type Log = { info: (o: object, m: string) => void; warn: (o: object, m: string) => void; error: (o: object, m: string) => void };
 
@@ -31,6 +31,9 @@ const COLD_START_SWIPES = 10;
 const COLD_START_JITTER = 0.8;
 const RT_WAIT_MS = 2500;
 const LIBRARY_LIMIT = 2000;
+const SEARCH_CLICKS_USED = 30;
+const SEARCH_LIFT = 0.25;
+const SEARCH_LIFT_HALF_LIFE = 14 * 24 * 3600_000;
 type MediaItem = ReturnType<typeof toMediaItem>;
 const BAYES_IDX = featureIndex('item_bayes_rating');
 
@@ -163,9 +166,12 @@ export class RecsService {
   async deck(userId: string, f: DeckFilters, exclude: string[], limit: number, favoriteGenres: number[] = []): Promise<DeckItem[]> {
     const now = Date.now();
     void this.refreshStats(); // stale-while-revalidate
-    const history = await this.store.getUserInteractions(userId);
-    const histItems = await this.catalog.getItems(history.slice(-300).map(h => h.itemKey));
-    const profile = buildProfile(userId, history, histItems, favoriteGenres);
+    const [history, clicks] = await Promise.all([
+      this.store.getUserInteractions(userId),
+      this.store.getSearchClicks(userId, SEARCH_CLICKS_USED),
+    ]);
+    const histItems = await this.catalog.getItems([...history.slice(-300).map(h => h.itemKey), ...clicks.map(c => c.itemKey)]);
+    const profile = buildProfile(userId, history, histItems, favoriteGenres, clicks);
     for (const k of exclude) profile.seen.add(k);
 
     const [pools, i2i] = await Promise.all([
@@ -194,9 +200,16 @@ export class RecsService {
     // New accounts all start from the same popular pool; a random nudge that fades out over
     // their first swipes gives each of them a different first deck.
     const coldness = Math.max(0, 1 - profile.n / COLD_START_SWIPES);
-    const jitter = <T extends { score: number }>(xs: T[]) => {
+    const jitter = <T extends { score: number; cand: Candidate }>(xs: T[]) => {
       // Proportional, so it reshuffles similar-fit cards without burying onboarding picks.
       if (coldness > 0) for (const x of xs) x.score *= 1 + Math.random() * COLD_START_JITTER * coldness;
+      // Titles found through Search are deliberate picks: what they pulled in gets a lift
+      // that fades over a couple of weeks. A score adjustment, not a feature, so logged
+      // features (training data) stay as they are.
+      for (const x of xs) {
+        const seed = x.cand.becauseOf ? profile.searchSeeds.get(x.cand.becauseOf) : undefined;
+        if (seed) x.score *= 1 + SEARCH_LIFT * seed.strength * Math.pow(0.5, Math.max(0, now - seed.at) / SEARCH_LIFT_HALF_LIFE);
+      }
       return xs;
     };
     const pass1 = jitter(scoreCandidates(cands, items, it => matchesFilters(it, f, now) !== 'no', profile, this.stats, this.model, now))
@@ -321,8 +334,8 @@ export class RecsService {
     return scores;
   }
 
-  async feedback(userId: string, key: string, action: Action, impressionId: string | null) {
-    await this.store.upsertInteraction({ userId, itemKey: key, action, ts: Date.now() }, impressionId);
+  async feedback(userId: string, key: string, action: Action, impressionId: string | null, source: InteractionSource = 'deck') {
+    await this.store.upsertInteraction({ userId, itemKey: key, action, ts: Date.now(), source }, impressionId);
     void this.maybeTrain();
   }
 
@@ -348,6 +361,23 @@ export class RecsService {
 
   async hide(userId: string, key: string) {
     await this.store.setHidden(userId, key, true);
+  }
+
+  /** Movies and shows matching `query` (TMDB search), with the user's own status on each. */
+  async search(userId: string, query: string) {
+    const [found, hist] = await Promise.all([this.catalog.search(query), this.store.getUserInteractions(userId)]);
+    const status = new Map(hist.filter(h => !h.hidden).map(h => [h.itemKey, h.action]));
+    return found.map(it => {
+      const a = status.get(it.key);
+      return {
+        ...toMediaItem(it),
+        myStatus: a === 'like' ? 'saved' as const : a?.startsWith('seen') ? 'watched' as const : null,
+      };
+    });
+  }
+
+  async searchClick(userId: string, query: string, key: string) {
+    await this.store.logSearchClick({ userId, query: query.slice(0, 100), itemKey: key, ts: Date.now() });
   }
 
   async undo(userId: string, key: string) {

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MediaItem } from '../services/tmdb';
-import { fetchLibrary, keyOf, sendHide } from '../services/recs';
+import { fetchLibrary, keyOf, sendHide, sendSearchFeedback } from '../services/recs';
 
 export type Era = 'all' | 'new' | 'classic';
 
@@ -42,6 +42,8 @@ export type AppContextType = {
   markWatched: (item: MediaItem) => Promise<void>;
   undoLastSwipe: () => void;
   removeFromSaved: (id: number) => Promise<void>;
+  /** Add a title found in Search to the Watchlist or the Watched list (not undoable from Discover). */
+  addFromSearch: (item: MediaItem, to: 'saved' | 'watched') => void;
   removeFromWatched: (id: number) => Promise<void>;
   resetHistory: () => Promise<void>;
   getTopGenres: () => number[];
@@ -346,6 +348,64 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     }
   }, [username]);
 
+  const addFromSearch = useCallback((item: MediaItem, to: 'saved' | 'watched') => {
+    sendSearchFeedback(item, to === 'saved' ? 'like' : 'seen');
+    const k = keyOf(item);
+    setSwipedIds(prev => {
+      const next = new Set(prev).add(item.id);
+      save(userKey(username, 'swipedIds'), Array.from(next));
+      return next;
+    });
+    const without = (list: MediaItem[]) => list.filter(i => keyOf(i) !== k);
+    if (to === 'saved') {
+      setLikedIds(prev => {
+        const next = new Set(prev).add(item.id);
+        save(userKey(username, 'likedIds'), Array.from(next));
+        return next;
+      });
+      setSavedItems(prev => {
+        const next = [...without(prev), item];
+        save(userKey(username, 'savedItems'), next);
+        return next;
+      });
+      setWatchedItems(prev => {
+        if (!prev.some(i => keyOf(i) === k)) return prev;
+        const next = without(prev);
+        save(userKey(username, 'watchedItems'), next);
+        return next;
+      });
+      setWatchedIds(prev => {
+        if (!prev.has(item.id)) return prev;
+        const next = new Set(prev); next.delete(item.id);
+        save(userKey(username, 'watchedIds'), Array.from(next));
+        return next;
+      });
+    } else {
+      setWatchedIds(prev => {
+        const next = new Set(prev).add(item.id);
+        save(userKey(username, 'watchedIds'), Array.from(next));
+        return next;
+      });
+      setWatchedItems(prev => {
+        const next = [...without(prev), item];
+        save(userKey(username, 'watchedItems'), next);
+        return next;
+      });
+      setSavedItems(prev => {
+        if (!prev.some(i => keyOf(i) === k)) return prev;
+        const next = without(prev);
+        save(userKey(username, 'savedItems'), next);
+        return next;
+      });
+    }
+    setActivityLog(prev => {
+      const event: ActivityEvent = { item, action: to === 'saved' ? 'liked' : 'watched', timestamp: Date.now() };
+      const next = [event, ...prev].slice(0, MAX_ACTIVITY_LOG);
+      save(userKey(username, 'activityLog'), next);
+      return next;
+    });
+  }, [username]);
+
   const removeFromSaved = useCallback(async (id: number) => {
     const item = savedItems.find(i => i.id === id);
     if (item) sendHide(item);
@@ -443,7 +503,7 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       deckCache, cacheDeckItems,
       filters, setFilters,
       recordSwipe, markWatched, undoLastSwipe,
-      removeFromSaved, removeFromWatched,
+      removeFromSaved, removeFromWatched, addFromSearch,
       resetHistory, getTopGenres,
       watchedRatings, rateWatched,
       stats,
