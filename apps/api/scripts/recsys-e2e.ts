@@ -577,7 +577,8 @@ try {
     assert.equal((await v(guestT, keys[0], 'yes')).body.match, true);
     assert.equal((await v(guestT, keys[1], 'yes')).body.match, false);
     assert.equal((await v(hostT, keys[1], 'no')).body.match, false);
-    assert.equal((await v(hostT, 'movie:1', 'yes')).status, 400);
+    const notInDeck = movies.map(f => `movie:${f.id}`).find(k => !keys.includes(k))!;
+    assert.equal((await v(hostT, notInDeck, 'yes')).status, 400);
     assert.equal((await v(strangerT, keys[2], 'yes')).status, 404);
     for (const k of keys.slice(2)) { await v(hostT, k, 'no'); }
     let last: any;
