@@ -41,7 +41,8 @@ export async function fetchDeck(
 type Pending =
   | { kind: 'feedback'; key: string; action: SwipeAction; impressionId?: string | null; source?: 'deck' | 'search' }
   | { kind: 'undo'; key: string }
-  | { kind: 'hide'; key: string };
+  | { kind: 'hide'; key: string }
+  | { kind: 'rate'; key: string; rating?: 'up' | 'meh' | 'down'; stars?: number | null };
 
 const QUEUE_KEY = 'movee.recsQueue';
 let queue: Pending[] = [];
@@ -71,6 +72,8 @@ async function flush() {
           await apiFetch('/api/recs/feedback', {
             body: { key: next.key, action: next.action, impressionId: next.impressionId ?? null, source: next.source ?? 'deck' },
           });
+        } else if (next.kind === 'rate') {
+          await apiFetch('/api/recs/rate', { body: { key: next.key, rating: next.rating, stars: next.stars } });
         } else if (next.kind === 'hide') {
           await apiFetch('/api/recs/hide', { body: { key: next.key } });
         } else {
@@ -132,9 +135,14 @@ export function sendHide(item: Pick<MediaItem, 'type' | 'id'>) {
   enqueue({ kind: 'hide', key: keyOf(item) });
 }
 
+/** Change a watched title's thumbs rating or 1–5 stars (from the Watchlist). */
+export function sendRating(item: Pick<MediaItem, 'type' | 'id'>, r: { rating?: 'up' | 'meh' | 'down'; stars?: number | null }) {
+  enqueue({ kind: 'rate', key: keyOf(item), ...r });
+}
+
 export type Library = {
   liked: Array<MediaItem & { at: number }>;
-  watched: Array<MediaItem & { at: number; myRating: 'up' | 'meh' | 'down' | null }>;
+  watched: Array<MediaItem & { at: number; myRating: 'up' | 'meh' | 'down' | null; myStars: number | null }>;
   /** Every title the server has a swipe for (including removed ones). */
   known: string[];
 };

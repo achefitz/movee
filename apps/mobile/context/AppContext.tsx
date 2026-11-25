@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MediaItem } from '../services/tmdb';
-import { fetchLibrary, keyOf, sendHide, sendSearchFeedback } from '../services/recs';
+import { fetchLibrary, keyOf, sendHide, sendRating, sendSearchFeedback } from '../services/recs';
 
 export type Era = 'all' | 'new' | 'classic';
 
@@ -48,6 +48,14 @@ export type AppContextType = {
   resetHistory: () => Promise<void>;
   getTopGenres: () => number[];
   watchedRatings: Record<number, 'up' | 'meh' | 'down'>;
+  /** 1–5 stars given in the Watchlist, by title id. */
+  watchedStars: Record<number, number>;
+  /**
+   * Re-rate a watched title from the Watchlist (saved to the account). Stars set the
+   * matching thumbs (1–2 👎, 3 👌, 4–5 👍); a thumbs change drops stars that disagree.
+   * `stars: null` clears the stars.
+   */
+  changeRating: (item: MediaItem, r: { rating?: 'up' | 'meh' | 'down'; stars?: number | null }) => void;
   rateWatched: (id: number, rating: 'up' | 'meh' | 'down') => Promise<void>;
   stats: {
     totalSwiped: number;
@@ -104,12 +112,13 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
   const [deckCache, setDeckCache] = useState<MediaItem[]>([]);
   const [filters, setFiltersState] = useState<Filters>(defaultFilters);
   const [watchedRatings, setWatchedRatings] = useState<Record<number, 'up' | 'meh' | 'down'>>({});
+  const [watchedStars, setWatchedStars] = useState<Record<number, number>>({});
   const [isLoaded, setIsLoaded] = useState(false);
   const lastActionRef = useRef<{ item: MediaItem; direction: 'left' | 'right' | 'up' } | null>(null);
 
   useEffect(() => {
     (async () => {
-      const [name, swiped, liked, watched, saved, skipped, watchedList, storedFilters, log, ratings] = await Promise.all([
+      const [name, swiped, liked, watched, saved, skipped, watchedList, storedFilters, log, ratings, stars] = await Promise.all([
         load(userKey(username, 'profileName'), username ?? 'Guest'),
         load(userKey(username, 'swipedIds'), [] as number[]),
         load(userKey(username, 'likedIds'), [] as number[]),
@@ -120,6 +129,7 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
         load(userKey(username, 'filters'), defaultFilters),
         load(userKey(username, 'activityLog'), [] as ActivityEvent[]),
         load(userKey(username, 'watchedRatings'), {} as Record<number, 'up' | 'meh' | 'down'>),
+        load(userKey(username, 'watchedStars'), {} as Record<number, number>),
       ]);
       setProfileNameState(name);
       setSwipedIds(new Set(swiped));
@@ -130,10 +140,11 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       setWatchedItems(watchedList);
       setActivityLog(log);
       setWatchedRatings(ratings);
+      setWatchedStars(stars);
       const merged: Filters = { ...defaultFilters, ...storedFilters };
       setFiltersState(merged);
       setIsLoaded(true);
-      if (username) await hydrateFromServer(saved, watchedList, ratings, swiped, log);
+      if (username) await hydrateFromServer(saved, watchedList, ratings, swiped, log, stars);
     })();
   }, [username]);
 
@@ -148,6 +159,7 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     localRatings: Record<number, 'up' | 'meh' | 'down'>,
     localSwiped: number[],
     localLog: ActivityEvent[],
+    localStars: Record<number, number>,
   ) {
     let res: Awaited<ReturnType<typeof fetchLibrary>>;
     try { res = await fetchLibrary(); } catch { return; } // offline: keep what's on the device
@@ -170,6 +182,9 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     const nextRatings: Record<number, 'up' | 'meh' | 'down'> = {};
     for (const w of serverWatched) if (w.myRating) nextRatings[w.id] = w.myRating;
     for (const w of watchedLocal) if (localRatings[w.id]) nextRatings[w.id] = localRatings[w.id];
+    const nextStars: Record<number, number> = {};
+    for (const w of serverWatched) if (w.myStars) nextStars[w.id] = w.myStars;
+    for (const w of watchedLocal) if (localStars[w.id]) nextStars[w.id] = localStars[w.id];
     const nextSwiped = new Set([...localSwiped, ...lib.known.map(k => Number(k.split(':')[1]))]);
 
     // Your own activity feed comes from the same server lists (newest first).
@@ -191,6 +206,8 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     setWatchedItems(nextWatched);
     setWatchedIds(nextWatchedIds);
     setWatchedRatings(nextRatings);
+    setWatchedStars(nextStars);
+    save(userKey(username, 'watchedStars'), nextStars);
     setSwipedIds(nextSwiped);
     save(userKey(username, 'savedItems'), nextSaved);
     save(userKey(username, 'likedIds'), nextSaved.map(i => i.id));
@@ -280,7 +297,37 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     });
   }, [username]);
 
+  const changeRating = useCallback((item: MediaItem, r: { rating?: 'up' | 'meh' | 'down'; stars?: number | null }) => {
+    const id = item.id;
+    const forStars = (s: number) => (s <= 2 ? 'down' : s === 3 ? 'meh' : 'up') as 'up' | 'meh' | 'down';
+    let stars: number | null = watchedStars[id] ?? null;
+    let rating = watchedRatings[id];
+    if (r.stars) { stars = r.stars; rating = forStars(r.stars); }
+    else if (r.rating) { rating = r.rating; if (stars && forStars(stars) !== rating) stars = null; }
+    else if (r.stars === null) stars = null;
+    setWatchedStars(prev => {
+      const next = { ...prev };
+      if (stars) next[id] = stars; else delete next[id];
+      save(userKey(username, 'watchedStars'), next);
+      return next;
+    });
+    if (rating) {
+      setWatchedRatings(prev => {
+        const next = { ...prev, [id]: rating! };
+        save(userKey(username, 'watchedRatings'), next);
+        return next;
+      });
+    }
+    sendRating(item, r);
+  }, [username, watchedStars, watchedRatings]);
+
   const rateWatched = useCallback(async (id: number, rating: 'up' | 'meh' | 'down') => {
+    setWatchedStars(prev => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev }; delete next[id]; // a new swipe rating replaces old stars
+      save(userKey(username, 'watchedStars'), next);
+      return next;
+    });
     setWatchedRatings(prev => {
       const next = { ...prev, [id]: rating };
       save(userKey(username, 'watchedRatings'), next);
@@ -455,7 +502,9 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
     setWatchedItems([]);
     setActivityLog([]);
     setWatchedRatings({});
+    setWatchedStars({});
     await AsyncStorage.multiRemove([
+      userKey(username, 'watchedStars'),
       userKey(username, 'swipedIds'),
       userKey(username, 'likedIds'),
       userKey(username, 'watchedIds'),
@@ -505,7 +554,7 @@ export function AppProvider({ children, username }: { children: ReactNode; usern
       recordSwipe, markWatched, undoLastSwipe,
       removeFromSaved, removeFromWatched, addFromSearch,
       resetHistory, getTopGenres,
-      watchedRatings, rateWatched,
+      watchedRatings, rateWatched, watchedStars, changeRating,
       stats,
     }}>
       {children}

@@ -1,4 +1,4 @@
-import { labelOf, weightOf, yearOf, type CatalogItem, type Interaction, type SearchClick } from './types';
+import { interactionWeight, labelOf, yearOf, type CatalogItem, type Interaction, type SearchClick } from './types';
 
 export type SparseVec = Map<string, number>;
 
@@ -134,7 +134,7 @@ export function buildProfile(
     if (item.type === 'movie') movies++;
     const age = hist.length - 1 - idx;
     const fromSearch = it.source === 'search';
-    const w = weightOf(it.action) * Math.pow(DECAY, age) * (fromSearch ? SEARCH_BOOST : 1);
+    const w = interactionWeight(it) * Math.pow(DECAY, age) * (fromSearch ? SEARCH_BOOST : 1);
 
     for (const g of canonicalGenres(item)) {
       count(genre, g, y);

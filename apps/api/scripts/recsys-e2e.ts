@@ -541,7 +541,8 @@ try {
     await call('POST', `${base}/feedback`, { key: skipped, action: 'skip' }, guestT);
     await call('POST', `${base}/feedback`, { key: watched, action: 'seen_up' }, hostT);
     const providerOf = (k: string) => movies.find(f => `movie:${f.id}` === k)!.providers;
-    const hostProv = providerOf(shared).slice(0, 1);
+    // The shared pick's own service when it has one (so it can lead the deck), else any service in use.
+    const hostProv = providerOf(shared).length ? providerOf(shared).slice(0, 1) : [movies.find(f => f.providers.length)!.providers[0]];
     const old = (await call('POST', P, { username: 'party_guest', mediaType: 'movie', providers: hostProv }, hostT)).body.party;
     const created = await call('POST', P, { username: '@party_guest', mediaType: 'movie', providers: hostProv }, hostT);
     assert.equal(created.status, 201);
@@ -566,7 +567,7 @@ try {
     assert.ok(view.items.every((i: any) => i.streamingIds.some((x: number) => [...hostProv, guestProv].includes(x))), 'title not on the chosen services');
     assert.ok(!keys.includes(skipped) && !keys.includes(watched), 'skipped/watched titles must be left out');
     if (providerOf(shared).some(x => [...hostProv, guestProv].includes(x))) {
-      assert.ok(keys.indexOf(shared) >= 0 && keys.indexOf(shared) < 5, `title on both watchlists should lead (at ${keys.indexOf(shared)})`);
+      assert.equal(keys.indexOf(shared), 0, `title on both watchlists should come first (at ${keys.indexOf(shared)})`);
     }
     const hostView = (await call('GET', `${P}/${id}`, undefined, hostT)).body;
     assert.deepEqual(hostView.items.map((i: any) => `${i.type}:${i.id}`), keys, 'both see the same deck');
@@ -593,6 +594,41 @@ try {
     assert.ok(!(await call('GET', P, undefined, guestT)).body.parties.some((p: any) => p.id === p2.id));
     assert.equal((await call('POST', `${P}/${p2.id}/accept`, {}, hostT)).status, 409);
     ok('either side can invite; declined invites disappear');
+  }
+
+  // 19. Re-rating watched titles: thumbs and 1–5 stars
+  {
+    const rT = await tokenFor('rater');
+    const d = (await post('/deck', { userId: 'rater', limit: 4 })).body.items as any[];
+    const [w1, w2] = d.map(i => i.key as string);
+    await call('POST', `${base}/feedback`, { key: w1, action: 'seen_up', impressionId: d[0].impressionId }, rT);
+    const rate = (b: object) => call('POST', `${base}/rate`, b, rT);
+    const wOf = async (k: string) => (await call('GET', `${base}/library`, undefined, rT)).body.watched.find((i: any) => `${i.type}:${i.id}` === k);
+    assert.deepEqual((await rate({ key: w1, rating: 'down' })).body, { rating: 'down', stars: null });
+    assert.equal((await wOf(w1)).myRating, 'down');
+    assert.deepEqual((await rate({ key: w1, stars: 5 })).body, { rating: 'up', stars: 5 });
+    const after = await wOf(w1);
+    assert.equal(after.myRating, 'up'); assert.equal(after.myStars, 5);
+    assert.deepEqual((await rate({ key: w1, rating: 'up' })).body, { rating: 'up', stars: 5 }, 'agreeing thumbs keep the stars');
+    assert.deepEqual((await rate({ key: w1, rating: 'meh' })).body, { rating: 'meh', stars: null }, 'disagreeing thumbs clear the stars');
+    assert.deepEqual((await rate({ key: w1, stars: 2 })).body, { rating: 'down', stars: 2 });
+    assert.deepEqual((await rate({ key: w1, stars: null })).body, { rating: 'down', stars: null });
+    assert.equal((await rate({ key: w1, stars: 6 })).status, 400);
+    // Rating something not yet marked watched marks it watched.
+    assert.deepEqual((await rate({ key: w2, stars: 4 })).body, { rating: 'up', stars: 4 });
+    assert.equal((await wOf(w2)).myStars, 4);
+    ok('watched titles can be re-rated (thumbs or 1–5 stars, kept consistent)');
+
+    const now = Date.now();
+    const f = fakes.find(x => x.type === 'movie')!;
+    const items = new Map<string, any>([[`movie:${f.id}`, { key: `movie:${f.id}`, id: f.id, type: 'movie', title: 'x', genres: f.genres, releaseDate: f.date, voteAverage: f.vote, voteCount: f.votes, popularity: f.pop, language: 'en', keywords: f.kw, cast: [] }]]);
+    const prof = (stars: number | null) => buildProfile('u', [{ userId: 'u', itemKey: `movie:${f.id}`, action: 'seen_up', ts: now, stars }], items);
+    const g = `g:${f.genres[0]}`;
+    const raw = (p: any) => p.tasteVec.get(g) ?? 0;
+    assert.ok(raw(prof(5)) > 0 && raw(prof(1)) < 0, '5 stars pulls toward, 1 star pushes away');
+    const kw = (p: any) => p.keywordW.get(f.kw[0]) ?? 0;
+    assert.ok(kw(prof(5)) > kw(prof(4)) && kw(prof(4)) > kw(prof(3)), '5★ should count more than 4★, 4★ more than 3★');
+    ok('stars refine the taste profile: 5★ > 4★ > … and 1★ pushes away');
   }
 
   // 13. Varied first decks + onboarding "show more"

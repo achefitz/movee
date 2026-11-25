@@ -43,6 +43,8 @@ export type Interaction = {
   hidden?: boolean;
   /** 'search' = added from the Search tab (weighted up in the taste profile). Default 'deck'. */
   source?: InteractionSource;
+  /** 1–5 stars from the Watchlist (watched titles). */
+  stars?: number | null;
 };
 
 export type InteractionSource = 'deck' | 'search';
@@ -78,6 +80,19 @@ export const DEFAULT_FILTERS: DeckFilters = {
 /** Positive = the user wants more like this. "Seen" without a thumbs-down still signals taste. */
 export function labelOf(action: Action): 0 | 1 {
   return action === 'skip' || action === 'seen_down' ? 0 : 1;
+}
+
+/** Stars → the matching thumbs rating: 1–2 down, 3 so-so, 4–5 up. */
+export function actionForStars(stars: number): Action {
+  return stars <= 2 ? 'seen_down' : stars === 3 ? 'seen_meh' : 'seen_up';
+}
+
+/** Taste-profile weight of 1–5 stars: finer than thumbs (5★ > 👍, 1★ < 👎). */
+const STAR_WEIGHT: Record<number, number> = { 1: -1.4, 2: -0.8, 3: 0.4, 4: 1.6, 5: 2.6 };
+
+/** Weight of an interaction: its stars when given, else its action. */
+export function interactionWeight(i: Pick<Interaction, 'action' | 'stars'>): number {
+  return i.stars && STAR_WEIGHT[i.stars] !== undefined ? STAR_WEIGHT[i.stars] : weightOf(i.action);
 }
 
 /** How strongly an interaction moves the taste profile. */

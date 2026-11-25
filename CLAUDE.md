@@ -122,6 +122,12 @@ open items) is `docs/HANDOFF.md`.
   streaming filter, genre re-rank. Both swipe it in `app/party/[id].tsx` (SwipeCard with trailers,
   no swipe-up); both yes = match (shown at once). Only matches are revealed. Social polls every 6 s
   (no push notifications). Party votes don't feed the personal recommender.
+- **Re-rating watched titles** (Watchlist → Watched rows, `RatingBar` in `watchlist.tsx`): 👎/👌/👍 and 1–5
+  stars, via `changeRating` → `POST /api/recs/rate` (`service.rate`, `store.setRating`: changes action +
+  `recs_interactions.stars` only, so the swipe's time, source and impression link stay). Stars set the
+  thumbs (1–2 👎, 3 👌, 4–5 👍); a thumbs change keeps stars only if they agree. In the taste profile
+  `interactionWeight()` uses stars when present (5★ 2.6 … 1★ −1.4) instead of the thumbs weight.
+  Titles on both people's Watchlists are pinned to the front of a watch party deck.
 - The TMDB rating is not shown anywhere (IMDb / Rotten Tomatoes only); the min-rating filter still uses it.
 - On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync

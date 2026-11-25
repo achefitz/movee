@@ -13,7 +13,7 @@ export default function SavedScreen() {
   const { savedItems, removeFromSaved } = useAppContext();
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
 
-  const paddingTop = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
+  const paddingTop = Platform.OS === 'web' ? Math.max(insets.top, 12) : insets.top;
   const paddingBottom = Platform.OS === 'web' ? 100 : Math.max(insets.bottom + 60, 80);
 
   const confirmRemove = (id: number, title: string) => {

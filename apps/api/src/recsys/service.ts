@@ -13,7 +13,7 @@ import { buildProfile, canonicalGenres, noveltyTest } from './profile';
 import { MIN_TRAINING_ROWS, trainRanker, type EnsembleModel, type Ranker, type TrainReport, type TrainingRow } from './ranker';
 import { buildGlobalStats, emptyStats, type GlobalStats } from './stats';
 import type { RecsStore } from './store';
-import { DEFAULT_FILTERS, yearOf, type Action, type CatalogItem, type DeckFilters, type InteractionSource } from './types';
+import { actionForStars, DEFAULT_FILTERS, yearOf, type Action, type CatalogItem, type DeckFilters, type InteractionSource } from './types';
 
 type Log = { info: (o: object, m: string) => void; warn: (o: object, m: string) => void; error: (o: object, m: string) => void };
 
@@ -352,14 +352,42 @@ export class RecsService {
     const shown = hist.filter(i => !i.hidden && (i.action === 'like' || i.action.startsWith('seen'))).slice(0, LIBRARY_LIMIT);
     const items = await this.catalog.getItems(shown.map(h => h.itemKey));
     const liked: Array<MediaItem & { at: number }> = [];
-    const watched: Array<MediaItem & { at: number; myRating: 'up' | 'meh' | 'down' | null }> = [];
+    const watched: Array<MediaItem & { at: number; myRating: 'up' | 'meh' | 'down' | null; myStars: number | null }> = [];
     for (const h of shown) {
       const it = items.get(h.itemKey);
       if (!it) continue;
       if (h.action === 'like') liked.push({ ...toMediaItem(it), at: h.ts });
-      else watched.push({ ...toMediaItem(it), at: h.ts, myRating: (h.action.slice(5) || null) as 'up' | 'meh' | 'down' | null });
+      else watched.push({ ...toMediaItem(it), at: h.ts, myRating: (h.action.slice(5) || null) as 'up' | 'meh' | 'down' | null, myStars: h.stars ?? null });
     }
     return { liked, watched, known: hist.map(h => h.itemKey) };
+  }
+
+  /**
+   * Re-rate a watched title from the Watchlist: thumbs and/or 1–5 stars. Stars set the matching
+   * thumbs; a thumbs change keeps the stars only if they still agree. Marks it watched if it wasn't.
+   */
+  async rate(userId: string, key: string, r: { rating?: 'up' | 'meh' | 'down'; stars?: number | null }) {
+    const cur = (await this.store.getUserInteractions(userId)).find(i => i.itemKey === key);
+    let stars = cur?.stars ?? null;
+    let action: Action;
+    if (r.stars !== undefined && r.stars !== null) {
+      stars = r.stars;
+      action = actionForStars(r.stars);
+    } else if (r.rating) {
+      action = `seen_${r.rating}` as Action;
+      if (stars !== null && actionForStars(stars) !== action) stars = null;
+      if (r.stars === null) stars = null;
+    } else {
+      stars = null; // stars cleared, thumbs unchanged
+      action = cur && cur.action.startsWith('seen') ? cur.action : 'seen';
+    }
+    if (!cur) {
+      await this.store.upsertInteraction({ userId, itemKey: key, action, ts: Date.now() }, null);
+      if (stars !== null) await this.store.setRating(userId, key, action, stars);
+    } else {
+      await this.store.setRating(userId, key, action, stars);
+    }
+    return { rating: (action.slice(5) || null) as 'up' | 'meh' | 'down' | null, stars };
   }
 
   async hide(userId: string, key: string) {
@@ -436,8 +464,11 @@ export class RecsService {
       return m === 'yes' || (m === 'unknown' && poolKeys.has(it.key));
     };
     const second = await combine(shortlist, keep, enriched);
-    const novel = noveltyTest(pa);
-    return rerank(second, Math.min(pa.n, pb.n), size, it => novel(it) && noveltyTest(pb)(it)).map(s => s.item.key);
+    const novel = noveltyTest(pa), novelB = noveltyTest(pb);
+    const ranked = rerank(second, Math.min(pa.n, pb.n), size, it => novel(it) && novelB(it)).map(s => s.item.key);
+    // Titles you both already saved are the surest picks: always first, never pushed down for variety.
+    const both = second.filter(s => (liked.get(s.item.key) ?? 0) >= 2).sort((x, y) => y.score - x.score).map(s => s.item.key);
+    return [...new Set([...both, ...ranked])].slice(0, size);
   }
 
   /** Catalog items for a stored party deck, in deck order, with fresh ratings. */

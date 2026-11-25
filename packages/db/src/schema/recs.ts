@@ -21,6 +21,8 @@ export const recsInteractions = pgTable(
     // Where the swipe came from: 'deck' (Discover) or 'search' (added from the Search tab,
     // a deliberate pick that the taste profile weighs more).
     source: text("source").default("deck").notNull(),
+    // 1–5 stars given in the Watchlist (watched titles only); refines the thumbs rating.
+    stars: integer("stars"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [

@@ -58,7 +58,7 @@ function relativeTime(ts: number): string {
 
 export default function SocialScreen() {
   const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' ? Math.max(insets.top, 12) : insets.top;
   const { user } = useAuth();
   const { savedItems, watchedItems, activityLog, deckCache } = useAppContext();
 

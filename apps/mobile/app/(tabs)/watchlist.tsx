@@ -12,6 +12,63 @@ import { useAppContext } from '@/context/AppContext';
 import { MediaItem } from '@/services/tmdb';
 import { shareItem } from '@/utils/share';
 import { MediaDetailModal } from '@/components/MediaDetailModal';
+import { sendFeedback } from '@/services/recs';
+
+type Thumbs = 'up' | 'meh' | 'down';
+
+/** Your rating of a watched title: 1–5 stars plus 👎 / 👌 / 👍, kept in sync (1–2★ 👎, 3★ 👌, 4–5★ 👍). */
+function RatingBar({ title, rating, stars, onChange }: {
+  title: string;
+  rating?: Thumbs;
+  stars?: number;
+  onChange: (r: { rating?: Thumbs; stars?: number | null }) => void;
+}) {
+  const thumbs: Array<{ v: Thumbs; icon: 'thumbs-down' | 'thumbs-up'; color: string; label: string; rotate?: boolean }> = [
+    { v: 'down', icon: 'thumbs-down', color: '#E74C3C', label: 'Not great' },
+    { v: 'meh', icon: 'thumbs-up', color: '#F5C518', label: 'It was OK', rotate: true },
+    { v: 'up', icon: 'thumbs-up', color: '#2ECC71', label: 'Loved it' },
+  ];
+  return (
+    <View style={styles.ratingBar}>
+      <View style={styles.stars}>
+        {[1, 2, 3, 4, 5].map(n => (
+          <TouchableOpacity
+            key={n}
+            onPress={() => onChange({ stars: stars === n ? null : n })}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityLabel={stars === n ? `Clear your ${n}-star rating of ${title}` : `Rate ${title} ${n} out of 5`}
+            accessibilityState={{ selected: !!stars && n <= stars }}
+          >
+            <Ionicons name={stars && n <= stars ? 'star' : 'star-outline'} size={22} color={stars && n <= stars ? Colors.accent : Colors.textMuted} />
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.thumbs}>
+        {thumbs.map(t => {
+          const on = rating === t.v;
+          return (
+            <TouchableOpacity
+              key={t.v}
+              style={[styles.thumbBtn, on && { backgroundColor: t.color + '26', borderColor: t.color }]}
+              onPress={() => onChange({ rating: t.v })}
+              accessibilityRole="button"
+              accessibilityLabel={`${t.label}: ${title}`}
+              accessibilityState={{ selected: on }}
+            >
+              <Ionicons
+                name={t.icon}
+                size={15}
+                color={on ? t.color : Colors.textMuted}
+                style={t.rotate ? { transform: [{ rotate: '90deg' }] } : undefined}
+              />
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 type SubTab = 'towatch' | 'watched';
 
@@ -22,13 +79,18 @@ function MediaRow({
   onCheck,
   showCheck,
   rating,
+  stars,
+  onRate,
 }: {
   item: MediaItem;
   onRemove: () => void;
   onOpen: () => void;
   onCheck?: () => void;
   showCheck?: boolean;
-  rating?: 'up' | 'meh' | 'down';
+  rating?: Thumbs;
+  stars?: number;
+  /** Watched titles only: change the rating. */
+  onRate?: (r: { rating?: Thumbs; stars?: number | null }) => void;
 }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
@@ -43,7 +105,8 @@ function MediaRow({
   }, [onCheck, scaleAnim, opacityAnim]);
 
   return (
-    <Animated.View style={[styles.row, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+    <Animated.View style={[styles.row, styles.rowColumn, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+      <View style={styles.rowTop}>
       <TouchableOpacity
         style={styles.rowMain}
         onPress={onOpen}
@@ -55,15 +118,6 @@ function MediaRow({
       <View style={styles.rowInfo}>
         <View style={styles.titleRow}>
           <Text style={styles.rowTitle} numberOfLines={2}>{item.title}</Text>
-          {rating === 'up' && (
-            <Ionicons name="thumbs-up" size={14} color="#2ECC71" style={styles.ratingIcon} />
-          )}
-          {rating === 'meh' && (
-            <Ionicons name="thumbs-up" size={14} color="#F5C518" style={[styles.ratingIcon, { transform: [{ rotate: '90deg' }] }]} />
-          )}
-          {rating === 'down' && (
-            <Ionicons name="thumbs-down" size={14} color="#E74C3C" style={styles.ratingIcon} />
-          )}
         </View>
         <View style={styles.rowMeta}>
           <View style={styles.typeBadge}>
@@ -90,6 +144,8 @@ function MediaRow({
           <Ionicons name="close-circle" size={22} color={Colors.textMuted} />
         </TouchableOpacity>
       </View>
+      </View>
+      {onRate && <RatingBar title={item.title} rating={rating} stars={stars} onChange={onRate} />}
     </Animated.View>
   );
 }
@@ -100,10 +156,10 @@ export default function WatchlistScreen() {
   const [selected, setSelected] = useState<MediaItem | null>(null);
   const {
     savedItems, watchedItems, removeFromSaved, removeFromWatched,
-    markWatched, watchedRatings,
+    markWatched, watchedRatings, watchedStars, changeRating,
   } = useAppContext();
 
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' ? Math.max(insets.top, 12) : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const items = activeTab === 'towatch' ? savedItems : watchedItems;
@@ -120,6 +176,7 @@ export default function WatchlistScreen() {
 
   function handleMoveToWatched(item: MediaItem) {
     markWatched(item);
+    sendFeedback(item, 'seen'); // saved to the account, so it stays watched on every device
   }
 
   return (
@@ -186,6 +243,8 @@ export default function WatchlistScreen() {
               onRemove={() => confirmRemove(item.id, activeTab === 'towatch')}
               onOpen={() => setSelected(item)}
               rating={activeTab === 'watched' ? watchedRatings[item.id] : undefined}
+              stars={activeTab === 'watched' ? watchedStars[item.id] : undefined}
+              onRate={activeTab === 'watched' ? r => changeRating(item, r) : undefined}
             />
           )}
           contentContainerStyle={{ paddingBottom: botPad + 80, paddingHorizontal: 16, paddingTop: 8 }}
@@ -203,6 +262,18 @@ export default function WatchlistScreen() {
 }
 
 const styles = StyleSheet.create({
+  rowColumn: { flexDirection: 'column', alignItems: 'stretch' },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  ratingBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border,
+  },
+  stars: { flexDirection: 'row', gap: 6 },
+  thumbs: { flexDirection: 'row', gap: 6 },
+  thumbBtn: {
+    width: 34, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+  },
   rowMain: {
     flex: 1,
     flexDirection: 'row',

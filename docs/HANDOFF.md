@@ -246,3 +246,4 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 10. Trailer shown as a 2:1 strip instead of cropped to fill; less top padding on web Discover; tapping any title (Watchlist, Profile lists, user profiles, activity feed) opens its details.
 11. Search tab: find any movie/show, add to Watchlist or mark Seen; search adds and opened results feed the recommender with extra weight.
 12. TMDB rating removed from the UI. Watch parties rebuilt: invite → accept → shared 30-title deck from both profiles on chosen services → swipe → matches.
+13. Watched titles can be re-rated in the Watchlist (thumbs + 1–5 stars, stars weigh into recommendations); ✓ To Watch → Watched now saves to the account; less top padding on all tabs (web).

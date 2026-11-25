@@ -17,6 +17,8 @@ export interface RecsStore {
   upsertInteraction(i: Interaction, impressionId: string | null): Promise<void>;
   deleteInteraction(userId: string, itemKey: string): Promise<void>;
   setHidden(userId: string, itemKey: string, hidden: boolean): Promise<void>;
+  /** Change a watched title's rating without touching when/where it was swiped. */
+  setRating(userId: string, itemKey: string, action: Action, stars: number | null): Promise<void>;
   logSearchClick(c: SearchClick): Promise<void>;
   /** Newest first. */
   getSearchClicks(userId: string, limit: number): Promise<SearchClick[]>;
@@ -42,9 +44,9 @@ export async function createPgStore(): Promise<RecsStore> {
   } = (await import('@movee/db')) as Db;
   const CHUNK = 500;
 
-  const toInteraction = (r: { userId: string; itemKey: string; action: string; hidden: boolean; source: string; createdAt: Date }): Interaction => ({
+  const toInteraction = (r: { userId: string; itemKey: string; action: string; hidden: boolean; source: string; stars: number | null; createdAt: Date }): Interaction => ({
     userId: r.userId, itemKey: r.itemKey, action: r.action as Action, ts: r.createdAt.getTime(), hidden: r.hidden,
-    source: r.source as InteractionSource,
+    source: r.source as InteractionSource, stars: r.stars,
   });
 
   return {
@@ -61,7 +63,7 @@ export async function createPgStore(): Promise<RecsStore> {
         .values({ userId: i.userId, itemKey: i.itemKey, action: i.action, impressionId, source: i.source ?? 'deck', createdAt: new Date(i.ts) })
         .onConflictDoUpdate({
           target: [I.userId, I.itemKey],
-          set: { action: i.action, impressionId, hidden: false, source: i.source ?? 'deck', createdAt: new Date(i.ts) },
+          set: { action: i.action, impressionId, hidden: false, source: i.source ?? 'deck', stars: null, createdAt: new Date(i.ts) },
         });
     },
     async deleteInteraction(userId, itemKey) {
@@ -69,6 +71,9 @@ export async function createPgStore(): Promise<RecsStore> {
     },
     async setHidden(userId, itemKey, hidden) {
       await db.update(I).set({ hidden }).where(and(eq(I.userId, userId), eq(I.itemKey, itemKey)));
+    },
+    async setRating(userId, itemKey, action, stars) {
+      await db.update(I).set({ action, stars, hidden: false }).where(and(eq(I.userId, userId), eq(I.itemKey, itemKey)));
     },
     async logSearchClick(c) {
       await db.insert(SC).values({ userId: c.userId, query: c.query, itemKey: c.itemKey, createdAt: new Date(c.ts) });
@@ -163,7 +168,11 @@ export function createMemoryStore(): RecsStore {
     async getAllInteractions(limit) {
       return [...interactions.values()].sort((a, b) => b.ts - a.ts).slice(0, limit);
     },
-    async upsertInteraction(i, impressionId) { interactions.set(k(i.userId, i.itemKey), { ...i, source: i.source ?? 'deck', hidden: false, impressionId }); },
+    async upsertInteraction(i, impressionId) { interactions.set(k(i.userId, i.itemKey), { ...i, source: i.source ?? 'deck', stars: null, hidden: false, impressionId }); },
+    async setRating(userId, itemKey, action, stars) {
+      const cur = interactions.get(k(userId, itemKey));
+      if (cur) interactions.set(k(userId, itemKey), { ...cur, action, stars, hidden: false });
+    },
     async deleteInteraction(userId, itemKey) { interactions.delete(k(userId, itemKey)); },
     async setHidden(userId, itemKey, hidden) {
       const cur = interactions.get(k(userId, itemKey));

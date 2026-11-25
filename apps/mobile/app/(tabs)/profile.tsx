@@ -95,7 +95,7 @@ export default function ProfileScreen() {
 
   const displayName = user?.username ?? profileName;
 
-  const paddingTop = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
+  const paddingTop = Platform.OS === 'web' ? Math.max(insets.top, 12) : insets.top;
   const paddingBottom = Platform.OS === 'web' ? 100 : Math.max(insets.bottom + 60, 80);
 
   const genreCounts: Record<number, number> = {};

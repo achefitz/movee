@@ -37,6 +37,11 @@ const FeedbackBody = z.object({
   impressionId: z.string().uuid().nullish(),
   source: z.enum(['deck', 'search']).default('deck'),
 });
+const RateBody = z.object({
+  key: Key,
+  rating: z.enum(['up', 'meh', 'down']).optional(),
+  stars: z.number().int().min(1).max(5).nullable().optional(),
+});
 const SearchClickBody = z.object({ key: Key, query: z.string().min(1).max(100) });
 const UndoBody = z.object({ key: Key });
 const SyncBody = z.object({
@@ -92,6 +97,8 @@ router.post('/search/click', handle(SearchClickBody, async (b, svc, userId) => {
   await svc.searchClick(userId, b.query, b.key);
   return { ok: true };
 }));
+
+router.post('/rate', handle(RateBody, (b, svc, userId) => svc.rate(userId, b.key, b)));
 
 router.post('/hide', handle(UndoBody, async (b, svc, userId) => {
   await svc.hide(userId, b.key);
