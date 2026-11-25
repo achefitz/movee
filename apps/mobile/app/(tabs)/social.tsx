@@ -13,7 +13,7 @@ import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { MediaItem } from '@/services/tmdb';
 import { MediaDetailModal } from '@/components/MediaDetailModal';
-import { WatchParties, type WatchPartiesHandle } from '@/components/WatchParties';
+import { WatchParties } from '@/components/WatchParties';
 
 type Friend = {
   username: string;
@@ -72,7 +72,6 @@ export default function SocialScreen() {
   const [loadingFriends, setLoadingFriends] = useState(true);
   const [activityModalVisible, setActivityModalVisible] = useState(false);
   const [selectedTitle, setSelectedTitle] = useState<MediaItem | null>(null);
-  const parties = useRef<WatchPartiesHandle>(null);
 
 
 
@@ -186,7 +185,12 @@ export default function SocialScreen() {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <WatchParties ref={parties} />
+        <WatchParties
+          friends={[...new Set([
+            ...friends.filter(f => f.status === 'accepted').map(f => f.username),
+            ...followers.map(f => f.username),
+          ])]}
+        />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Follow someone</Text>
@@ -269,21 +273,11 @@ export default function SocialScreen() {
                   </View>
                   <Text style={styles.friendName} numberOfLines={1}>{friend.username}</Text>
                 </TouchableOpacity>
-                {friend.status === 'pending' ? (
+                {friend.status === 'pending' && (
                   <View style={styles.pendingPill}>
                     <Ionicons name="lock-closed" size={11} color={Colors.textSecondary} />
                     <Text style={styles.pendingPillText}>Requested</Text>
                   </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.watchPartyBtn}
-                    onPress={() => parties.current?.invite(friend.username)}
-                    activeOpacity={0.8}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Watch party with ${friend.username}`}
-                  >
-                    <Text style={styles.watchPartyBtnText}>Watch Party 🎉</Text>
-                  </TouchableOpacity>
                 )}
                 <TouchableOpacity
                   style={styles.removeBtn}
@@ -322,17 +316,6 @@ export default function SocialScreen() {
                   </View>
                   <Text style={styles.friendName} numberOfLines={1}>{f.username}</Text>
                 </TouchableOpacity>
-                {!friends.some(x => x.username === f.username && x.status === 'accepted') && (
-                  <TouchableOpacity
-                    style={styles.watchPartyBtn}
-                    onPress={() => parties.current?.invite(f.username)}
-                    activeOpacity={0.8}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Watch party with ${f.username}`}
-                  >
-                    <Text style={styles.watchPartyBtnText}>Watch Party 🎉</Text>
-                  </TouchableOpacity>
-                )}
                 <TouchableOpacity
                   style={styles.removeBtn}
                   onPress={() => handleRemoveFollower(f.username)}
@@ -560,19 +543,6 @@ const styles = StyleSheet.create({
   approveBtnText: { color: '#000', fontWeight: '800', fontSize: 12 },
   declineBtn: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: Colors.border },
   declineBtnText: { color: Colors.textSecondary, fontWeight: '700', fontSize: 12 },
-  watchPartyBtn: {
-    backgroundColor: 'rgba(245,197,24,0.15)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(245,197,24,0.3)',
-  },
-  watchPartyBtnText: {
-    color: Colors.accent,
-    fontWeight: '700',
-    fontSize: 12,
-  },
   removeBtn: {
     marginLeft: 2,
   },

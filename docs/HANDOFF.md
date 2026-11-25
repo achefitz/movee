@@ -247,3 +247,4 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 11. Search tab: find any movie/show, add to Watchlist or mark Seen; search adds and opened results feed the recommender with extra weight.
 12. TMDB rating removed from the UI. Watch parties rebuilt: invite → accept → shared 30-title deck from both profiles on chosen services → swipe → matches.
 13. Watched titles can be re-rated in the Watchlist (thumbs + 1–5 stars, stars weigh into recommendations); ✓ To Watch → Watched now saves to the account; less top padding on all tabs (web).
+14. Group watch parties: one button in Social, invite up to 6 people, unanimous matches plus most-wanted ranking.

@@ -10,7 +10,7 @@ import { SwipeCard, type SwipeCardHandle } from '@/components/SwipeCard';
 import { MediaDetailModal } from '@/components/MediaDetailModal';
 import { TitleGrid } from '@/components/TitleGrid';
 import { ApiError } from '@/services/api';
-import { getParty, voteInParty, type PartySummary } from '@/services/parties';
+import { getParty, partyNames, voteInParty, type PartySummary } from '@/services/parties';
 import { keyOf } from '@/services/recs';
 import { fetchTrailerKey, type MediaItem } from '@/services/tmdb';
 
@@ -18,14 +18,16 @@ const MUTE_KEY = 'movee.trailerMuted';
 const POLL_MS = 5000;
 
 /**
- * A watch party: both people swipe the same deck (trailers autoplay like Discover).
- * Right = yes, left = no. A title you both say yes to is a match, shown at once.
+ * A watch party: everyone in the group swipes the same deck (trailers autoplay like Discover).
+ * Right = yes, left = no. A title everyone who joined says yes to is a match, shown at once;
+ * the results also rank titles by how many want them. Individual votes stay private.
  */
 export default function PartyScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const [party, setParty] = useState<PartySummary | null>(null);
   const [items, setItems] = useState<MediaItem[]>([]);
+  const [yesCounts, setYesCounts] = useState<Record<string, number>>({});
   const [queue, setQueue] = useState<MediaItem[]>([]);
   const [error, setError] = useState('');
   const [matchItem, setMatchItem] = useState<MediaItem | null>(null);
@@ -49,6 +51,7 @@ export default function PartyScreen() {
     try {
       const v = await getParty(String(id));
       setParty(v.party);
+      setYesCounts(v.yesCounts ?? {});
       if (first) {
         setItems(v.items);
         setQueue(v.items.filter(i => !v.myVotes[keyOf(i)]));
@@ -107,6 +110,15 @@ export default function PartyScreen() {
     const keys = new Set(party?.matches ?? []);
     return items.filter(i => keys.has(keyOf(i)));
   }, [party?.matches, items]);
+  // Not unanimous, but wanted by more than one: the group's runners-up.
+  const mostWanted = useMemo(() => {
+    const m = new Set(party?.matches ?? []);
+    return items
+      .filter(i => !m.has(keyOf(i)) && (yesCounts[keyOf(i)] ?? 0) >= 2)
+      .sort((a, b) => (yesCounts[keyOf(b)] ?? 0) - (yesCounts[keyOf(a)] ?? 0))
+      .slice(0, 6);
+  }, [items, yesCounts, party?.matches]);
+  const stillSwiping = (party?.members ?? []).filter(m => m.status === 'joined' && !m.isMe && m.progress < (party?.size ?? 0));
 
   const top = Platform.OS === 'web' ? Math.max(insets.top, 12) : insets.top;
   const back = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/social'));
@@ -119,7 +131,7 @@ export default function PartyScreen() {
           <Ionicons name="chevron-back" size={26} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerText}>
-          <Text style={styles.title} numberOfLines={1}>Watch party{party ? ` with ${party.with}` : ''}</Text>
+          <Text style={styles.title} numberOfLines={1}>Watch party{party ? ` with ${partyNames(party)}` : ''}</Text>
           {party && items.length > 0 && (
             <Text style={styles.sub}>
               {party.mediaType === 'movie' ? 'Movies' : 'TV shows'} · {done}/{items.length} · {party.matches.length} match{party.matches.length === 1 ? '' : 'es'}
@@ -138,7 +150,11 @@ export default function PartyScreen() {
       ) : party.status === 'pending' ? (
         <View style={styles.center}>
           <Text style={styles.bigEmoji}>⏳</Text>
-          <Text style={styles.h2}>Waiting for {party.with} to accept</Text>
+          <Text style={styles.h2}>Waiting for everyone to answer</Text>
+          <Text style={styles.muted}>
+            {party.members.filter(m => m.role === 'guest' && m.status === 'joined').length} of{' '}
+            {party.members.filter(m => m.role === 'guest').length} have joined so far.
+          </Text>
         </View>
       ) : party.status === 'cancelled' || party.status === 'declined' ? (
         <View style={styles.center}>
@@ -198,25 +214,41 @@ export default function PartyScreen() {
         <ScrollView contentContainerStyle={styles.results}>
           {party.status === 'done' ? (
             <Text style={styles.h2}>
-              {matches.length ? `You matched on ${matches.length} title${matches.length === 1 ? '' : 's'} 🎉` : 'No matches this time'}
+              {matches.length
+                ? `Everyone's in on ${matches.length} title${matches.length === 1 ? '' : 's'} 🎉`
+                : mostWanted.length ? 'No unanimous pick, but here are the favorites' : 'No matches this time'}
             </Text>
           ) : (
             <View style={styles.waiting}>
               <ActivityIndicator color={Colors.accent} />
               <Text style={styles.muted}>
-                You're done! Waiting for {party.with} ({party.theirProgress}/{party.size})
+                You're done! Still swiping:{' '}
+                {stillSwiping.map(m => `${m.username} (${m.progress}/${party.size})`).join(', ') || 'nobody'}
               </Text>
             </View>
           )}
-          {matches.length > 0 ? (
+          {matches.length > 0 && (
             <>
-              <Text style={styles.label}>Matches so far</Text>
+              <Text style={styles.label}>{party.status === 'done' ? 'Everyone wants to watch' : 'Matches so far'}</Text>
               <TitleGrid items={matches} empty="" />
             </>
-          ) : party.status === 'done' ? (
+          )}
+          {mostWanted.length > 0 && (
+            <>
+              <Text style={styles.label}>Most wanted</Text>
+              {mostWanted.map(i => (
+                <TouchableOpacity key={keyOf(i)} style={styles.wantRow} onPress={() => setSelected(i)} accessibilityRole="button">
+                  {i.posterUrl ? <Image source={i.posterUrl} style={styles.wantPoster} contentFit="cover" /> : <View style={styles.wantPoster} />}
+                  <Text style={styles.wantTitle} numberOfLines={2}>{i.title}</Text>
+                  <Text style={styles.wantCount}>{yesCounts[keyOf(i)]}/{party.joined} want it</Text>
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
+          {matches.length > 0 || mostWanted.length > 0 ? null : party.status === 'done' ? (
             <Text style={styles.muted}>Try another party with different services, or switch between Movies and TV.</Text>
           ) : (
-            <Text style={styles.muted}>Matches show up here as soon as you both say yes.</Text>
+            <Text style={styles.muted}>Matches show up here as soon as everyone says yes.</Text>
           )}
           <TouchableOpacity style={[styles.goldBtn, { alignSelf: 'center', marginTop: 12 }]} onPress={back}>
             <Text style={styles.goldText}>Back to Social</Text>
@@ -231,7 +263,9 @@ export default function PartyScreen() {
           <View style={styles.matchCard}>
             <Text style={styles.matchTitle}>It's a match! 🍿</Text>
             {matchItem?.posterUrl ? <Image source={matchItem.posterUrl} style={styles.matchPoster} contentFit="cover" /> : null}
-            <Text style={styles.matchText}>You and {party?.with} both want to watch {matchItem?.title}.</Text>
+            <Text style={styles.matchText}>
+              {party && party.joined > 2 ? 'Everyone' : `You and ${party ? partyNames(party) : 'your friend'}`} want{party && party.joined > 2 ? 's' : ''} to watch {matchItem?.title}.
+            </Text>
             <TouchableOpacity style={styles.goldBtn} onPress={() => setMatchItem(null)} accessibilityRole="button">
               <Text style={styles.goldText}>Keep swiping</Text>
             </TouchableOpacity>
@@ -267,6 +301,13 @@ const styles = StyleSheet.create({
   waiting: { alignItems: 'center', gap: 10, paddingVertical: 10 },
   goldBtn: { backgroundColor: Colors.accent, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 22 },
   goldText: { color: '#000', fontWeight: '800', fontSize: 15 },
+  wantRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 12,
+    backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.border,
+  },
+  wantPoster: { width: 40, height: 60, borderRadius: 6, backgroundColor: Colors.bg },
+  wantTitle: { flex: 1, color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  wantCount: { color: Colors.accent, fontSize: 13, fontWeight: '800' },
   matchOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   matchCard: {
     backgroundColor: Colors.bgCard, borderRadius: 24, padding: 24, alignItems: 'center', gap: 14,

@@ -113,15 +113,20 @@ open items) is `docs/HANDOFF.md`.
   genre like and seed retrieval first; opened results nudge taste at half weight without counting as
   seen; neighbours of searched titles get `SEARCH_SEED_BOOST` in co-visitation/i2i and a score lift
   (`SEARCH_LIFT`, half-life 14 days) that is not a feature, so training data is unaffected.
-- **Watch parties** (`routes/parties.ts`, `parties/store.ts`, tables `watch_parties` + `watch_party_votes`):
-  host invites someone they follow or who follows them, picking Movies/TV and streaming services
-  (`components/WatchParties.tsx` in Social, prefilled from Discover's streaming filter). Guest accepts
-  (may add services; the host's stay) → `service.partyDeck()` builds one 30-title deck: both profiles,
-  candidates retrieved for either, each scored for both and combined by geometric mean, titles on
-  either Watchlist boosted (both = most), anything either watched/skipped left out, exact type +
-  streaming filter, genre re-rank. Both swipe it in `app/party/[id].tsx` (SwipeCard with trailers,
-  no swipe-up); both yes = match (shown at once). Only matches are revealed. Social polls every 6 s
-  (no push notifications). Party votes don't feed the personal recommender.
+- **Watch parties (groups)** (`routes/parties.ts`, `parties/store.ts`; tables `watch_parties`,
+  `watch_party_members`, `watch_party_votes`): one "Start a watch party" button in Social
+  (`components/WatchParties.tsx`) → pick up to 6 people you follow or who follow you, Movies/TV and
+  streaming services (prefilled from Discover's streaming filter). Invitees accept (adding services
+  while it's gathering) or decline; it starts when nobody is left to answer (cancelled if nobody
+  joined) or when the host taps Start now (≥1 guest joined); later accepts join the running party.
+  `service.partyDeck(members[])`: candidates for every member, each scored for every member and combined
+  by geometric mean, Watchlist boost by share of members who saved it, titles on everyone's Watchlist
+  pinned first, anything any member watched/skipped left out. Swiped in `app/party/[id].tsx` (no
+  swipe-up). Match = every joined member said yes (pop-up at once); results also list "Most wanted"
+  by yes-count. Only matches and counts are shared, never who voted what. Host can call it off;
+  guests can leave. Pre-group two-person parties (`watch_parties.guest_id`, now nullable) get their
+  members derived on read. Social polls every 6 s (no push notifications). Party votes don't feed
+  the personal recommender.
 - **Re-rating watched titles** (Watchlist → Watched rows, `RatingBar` in `watchlist.tsx`): 👎/👌/👍 and 1–5
   stars, via `changeRating` → `POST /api/recs/rate` (`service.rate`, `store.setRating`: changes action +
   `recs_interactions.stars` only, so the swipe's time, source and impression link stay). Stars set the

@@ -2,16 +2,19 @@ import { index, integer, jsonb, pgTable, primaryKey, text, timestamp } from "dri
 import { users } from "./auth";
 
 /**
- * Watch parties: the host invites a friend, picks Movies or TV and streaming services; once the
- * guest accepts (adding their services), both swipe the same 30-title deck. Both "yes" = a match.
- * status: pending → active → done, or declined / cancelled.
+ * Group watch parties: the host invites up to 6 people, picking Movies or TV and streaming services.
+ * Invitees accept (adding their services) or decline. The party starts when everyone has answered
+ * or the host starts it: one 30-title deck from every joined member's taste, swiped by all.
+ * A title every joined member says yes to is a match.
+ * status: pending (gathering) → active → done, or cancelled.
  */
 export const watchParties = pgTable(
   "watch_parties",
   {
     id: text("id").primaryKey(), // uuid
     hostId: text("host_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    guestId: text("guest_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    // Two-person parties from before group parties; new parties list everyone in watch_party_members.
+    guestId: text("guest_id").references(() => users.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("pending"),
     mediaType: text("media_type").notNull(), // 'movie' | 'tv'
     providers: integer("providers").array().notNull().default([]),
@@ -32,4 +35,18 @@ export const watchPartyVotes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [primaryKey({ columns: [t.partyId, t.userId, t.itemKey] })],
+);
+
+/** Who is in a party. role 'host' | 'guest'; status 'invited' | 'joined' | 'declined' | 'left'. */
+export const watchPartyMembers = pgTable(
+  "watch_party_members",
+  {
+    partyId: text("party_id").notNull().references(() => watchParties.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("guest"),
+    status: text("status").notNull().default("invited"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.partyId, t.userId] }), index("watch_party_members_user").on(t.userId)],
 );
