@@ -284,7 +284,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
           {item.reason && !showingVideo ? (
             <View style={styles.reasonChip}>
               <Ionicons
-                name={item.reason === 'Something different' ? 'compass' : item.reason.startsWith('Because') ? 'sparkles' : 'trending-up'}
+                name={item.reason === 'Something different' ? 'compass' : item.reason === 'Critically acclaimed' ? 'ribbon' : 'trending-up'}
                 size={11}
                 color={Colors.accent}
               />

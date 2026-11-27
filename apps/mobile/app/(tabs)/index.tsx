@@ -25,8 +25,6 @@ const MUTE_KEY = 'movee.trailerMuted';
 const FIRST_PAGE = 15;
 const NEXT_PAGE = 20;
 
-const STAR_LABELS = ['', 'Hated it', 'Not great', 'It was OK', 'Liked it', 'Loved it'];
-
 /** "How was it?" after swiping up: 1–5 stars (same scale as the Watchlist). Tap a star to rate. */
 function RatingPrompt({
   item,
@@ -60,7 +58,7 @@ function RatingPrompt({
                 onHoverOut={() => setHover(0)}
                 hitSlop={6}
                 accessibilityRole="button"
-                accessibilityLabel={`${n} star${n === 1 ? '' : 's'}: ${STAR_LABELS[n]}`}
+                accessibilityLabel={`${n} star${n === 1 ? '' : 's'}`}
               >
                 <Ionicons
                   name={n <= shown ? 'star' : 'star-outline'}
@@ -70,9 +68,6 @@ function RatingPrompt({
               </Pressable>
             ))}
           </View>
-          <Text style={[promptStyles.caption, !shown && promptStyles.captionIdle]}>
-            {shown ? STAR_LABELS[shown] : 'Tap a star'}
-          </Text>
           <TouchableOpacity onPress={onSkip} hitSlop={8}>
             <Text style={promptStyles.skip}>Skip</Text>
           </TouchableOpacity>
@@ -102,8 +97,6 @@ const promptStyles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 14, color: Colors.textMuted, maxWidth: '80%', textAlign: 'center' },
   stars: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  caption: { color: Colors.accent, fontSize: 15, fontWeight: '800', minHeight: 20 },
-  captionIdle: { color: Colors.textMuted, fontWeight: '600' },
   skip: { color: Colors.textMuted, fontSize: 15, marginTop: 4 },
 });
 

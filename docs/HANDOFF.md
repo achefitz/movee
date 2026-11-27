@@ -250,3 +250,4 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 14. Group watch parties: one button in Social, invite up to 6 people, unanimous matches plus most-wanted ranking.
 15. Watchlist search; past watch parties hidden; trailer strip above the title on all cards; HBO Max label; web name "Movee - Discover your next watch".
 16. Login hardening: weak/breached passwords refused (Have I Been Pwned), change password + sign out other devices, recovery codes with Forgot password. "Liked" relabelled "To Watch" on profiles and the feed.
+17. 5-star "How was it?" (no captions); no "Because you …" labels on cards.

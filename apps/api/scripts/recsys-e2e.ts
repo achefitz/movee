@@ -223,8 +223,8 @@ try {
   console.log(`    sci-fi share: deck1 ${(share(d1) * 100).toFixed(0)}% → deck2 ${(share(d2) * 100).toFixed(0)}% (liked ${sciFiLikes.length} sci-fi, skipped the rest)`);
   if (sciFiLikes.length) {
     assert.ok(share(d2) > share(d1), 'deck did not shift toward liked genre');
-    assert.ok(d2.some(i => /^Because you (saved|loved|watched) /.test(i.reason ?? '')), 'no "Because you …" reason');
-    ok('deck shifts toward liked genre and explains why');
+    assert.ok(d2.every(i => !/^Because/.test(i.reason ?? '')), 'cards must not claim "Because you …"');
+    ok('deck shifts toward liked genre (no "Because you …" labels)');
   }
 
   // 4. Exclude list (cards already in the client's queue)
@@ -536,8 +536,22 @@ try {
     assert.ok(clickP.recentPositives.includes(`movie:${a.id}`) && !clickP.seen.has(`movie:${a.id}`));
     ok(`search adds weigh ${SEARCH_BOOST}x and seed recs first; opened results nudge taste without counting as seen`);
   }
-  const srDeck = (await post('/deck', { userId: 'searcher', limit: 20 })).body.items as any[];
-  assert.ok(srDeck.some(i => i.reason === `Because you saved Movie ${sq.id}`), 'deck should build on the title added from search (and say "saved")');
+  // TMDB's "similar titles" for the searched movie (the fake: same type, a shared genre).
+  const similar = new Set(fakes.filter(f => f.type === 'movie' && f.id !== sq.id && f.genres.some(g => sq.genres.includes(g)))
+    .slice(0, 20).map(f => `movie:${f.id}`));
+  const similarIn = async (user: string) => {
+    let n = 0;
+    const seen: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const d = (await post('/deck', { userId: user, limit: 20, exclude: seen })).body.items as any[];
+      seen.push(...d.map(x => x.key));
+      n += d.filter(x => similar.has(x.key)).length;
+    }
+    return n;
+  };
+  const [withSearch, without] = [await similarIn('searcher'), await similarIn('search_baseline')];
+  console.log(`    titles similar to the searched one: ${withSearch} after searching vs ${without} for a fresh account`);
+  assert.ok(withSearch > without, 'deck should build on the title added from search');
   ok('the next deck builds on what you added from search');
 
   // 18. Group watch parties

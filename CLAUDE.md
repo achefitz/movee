@@ -156,9 +156,10 @@ open items) is `docs/HANDOFF.md`.
 - Web app name: "Movee - Discover your next watch" (`app.json` `web.name`; `shortName` Movee).
 - Discover's "How was it?" (after swipe up) is 1–5 stars (`RatingPrompt` in `app/(tabs)/index.tsx`) → `changeRating`
   (`/api/recs/rate`), same scale and thumbs mapping as the Watchlist; Skip leaves it as plain "seen".
-- Deck reasons: `cand.becauseOf` is the seed (search add, opened search result, or recent positive) whose
-  co-visitation / i2i contribution was largest; the label says what you did with it (`reasonVerbs` in
-  `service.ts`): "Because you saved / loved / watched / looked up X".
+- Card labels (`toDeckItem`) only state facts about the title: "Something different", "Critically
+  acclaimed", "Trending now". **Never "Because you …"**: the user asked for none (it can read as wrong).
+  `cand.becauseOf` is still tracked internally (drives the search lift). The star prompt has no
+  captions ("Loved it" etc.), just stars.
 - The TMDB rating is not shown anywhere (IMDb / Rotten Tomatoes only); the min-rating filter still uses it.
 - On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync
