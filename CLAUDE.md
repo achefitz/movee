@@ -46,8 +46,23 @@ open items) is `docs/HANDOFF.md`.
   (`auth/crypto.ts`). Sessions: random bearer token; only its SHA-256 is stored (`sessions` table),
   60-day sliding expiry. Login/signup are rate-limited per IP and per username (`auth/rateLimit.ts`,
   in-memory, so per instance). Every route except `/api/healthz` and `/api/auth/{signup,login}`
-  requires `requireAuth` (`auth/middleware.ts`); handlers use `req.user.id`, never a user id from the
-  request body.
+  requires `requireAuth` (`auth/middleware.ts`), plus `/api/auth/recover`; handlers use `req.user.id`, never a
+  user id from the request body.
+- **Passwords** (`auth/passwordPolicy.ts`): ≥8 chars, not containing the username, not repetitive, not
+  on a short common list, and not in Have I Been Pwned's breach corpus (k-anonymity range API: only
+  5 hex chars of the SHA-1 leave the server; fails open after 2.5 s; `PWNED_CHECK=off` skips it).
+  Checked at signup, password change and recovery. App shows a local strength meter
+  (`components/PasswordStrength.tsx`). The app trims passwords before sending (login does too).
+- **Change password** `POST /api/auth/password {currentPassword,newPassword}` and **sign out other
+  devices** `POST /api/auth/logout-others` (both keep the current session, delete the rest). Wrong
+  passwords on these answer **403, not 401**: the app signs out on any 401.
+- **Recovery codes** (no email on accounts): `users.recovery_code_hash` (scrypt). A code
+  (`XXXX-XXXX-XXXX-XXXX`, no look-alike chars) is issued at signup and returned once
+  (`recoveryCode`); `POST /api/auth/recovery-code {password}` makes a new one; `POST /api/auth/recover
+  {username,code,newPassword}` (rate-limited like login) resets the password, signs out everywhere,
+  uses up the code and returns a new one. App: `RecoveryCodeModal` (shown once from AuthContext
+  `recoveryCode`), `app/recover.tsx` ("Forgot password?" on login), Profile → Account & security
+  (`components/AccountSecurity.tsx`).
 - **App side**: `services/api.ts` holds the token (expo-secure-store on phones, localStorage on web)
   and `apiFetch()` attaches it; any 401 signs the user out via `onUnauthorized`. Use `apiFetch` for
   every API call. `context/AuthContext.tsx` moves old on-device accounts (`cs:accounts`) to the

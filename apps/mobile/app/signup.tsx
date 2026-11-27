@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_PASSWORD, useAuth } from '@/context/AuthContext';
+import { PasswordStrength } from '@/components/PasswordStrength';
 import Colors from '@/constants/colors';
 
 export default function SignupScreen() {
@@ -103,11 +104,15 @@ export default function SignupScreen() {
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
                 returnKeyType="next"
+                autoComplete="new-password"
+                textContentType="newPassword"
+                accessibilityLabel="Password"
               />
               <TouchableOpacity onPress={() => setShowPassword(v => !v)} style={styles.eyeBtn}>
                 <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color={Colors.textMuted} />
               </TouchableOpacity>
             </View>
+            <PasswordStrength password={password.trim()} />
           </View>
 
           <View style={styles.inputGroup}>

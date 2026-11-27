@@ -16,4 +16,4 @@ export const db = drizzle(pool, { schema });
 export * from "./schema";
 
 // Query helpers, re-exported so apps share this package's single drizzle-orm copy.
-export { and, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
+export { and, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";

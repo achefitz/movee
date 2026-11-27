@@ -17,6 +17,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { RecoveryCodeModal } from '@/components/RecoveryCodeModal';
 import Colors from "@/constants/colors";
 
 SplashScreen.preventAutoHideAsync();
@@ -31,7 +32,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === 'login' || segments[0] === 'signup';
+    const inAuthGroup = segments[0] === 'login' || segments[0] === 'signup' || segments[0] === 'recover';
     const inOnboarding = segments[0] === 'onboarding';
 
     if (!user && !inAuthGroup) {
@@ -67,10 +68,12 @@ function RootLayoutNav() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="login" options={{ headerShown: false, animation: 'fade' }} />
             <Stack.Screen name="signup" options={{ headerShown: false, animation: 'slide_from_right' }} />
+            <Stack.Screen name="recover" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="party/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="user/[username]" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
           </Stack>
+          <RecoveryCodeModal />
         </AuthGate>
       </AppProviderWithAuth>
     </AuthProvider>

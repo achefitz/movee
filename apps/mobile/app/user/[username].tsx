@@ -119,14 +119,14 @@ export default function UserProfileScreen() {
                     accessibilityState={{ selected: tab === t }}
                   >
                     <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                      {t === 'liked' ? `Liked (${p.liked.length})` : `Watched (${p.watched.length})`}
+                      {t === 'liked' ? `To Watch (${p.liked.length})` : `Watched (${p.watched.length})`}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
               <TitleGrid
                 items={tab === 'liked' ? p.liked : p.watched}
-                empty={tab === 'liked' ? 'No likes yet.' : 'Nothing watched yet.'}
+                empty={tab === 'liked' ? 'Nothing on their watchlist yet.' : 'Nothing watched yet.'}
               />
             </>
           ) : (

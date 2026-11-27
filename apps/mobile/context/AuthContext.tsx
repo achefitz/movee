@@ -12,6 +12,8 @@ export type User = {
   onboarded: boolean;
   /** Private accounts approve each follower. */
   isPrivate: boolean;
+  /** A recovery code exists for "Forgot password?" (the code itself is never stored). */
+  hasRecoveryCode?: boolean;
 };
 
 type AuthResult = { success: boolean; error?: string };
@@ -25,6 +27,16 @@ export type AuthContextType = {
   markTutorialSeen: () => Promise<void>;
   completeOnboarding: (genres: number[], favoriteKeys: string[]) => Promise<AuthResult>;
   setPrivate: (isPrivate: boolean) => Promise<AuthResult>;
+  /** A recovery code to show the user once (after sign-up, recovery or making a new one). */
+  recoveryCode: string | null;
+  dismissRecoveryCode: () => void;
+  /** Forgot password: username + recovery code + new password; signs in. */
+  recover: (username: string, code: string, newPassword: string) => Promise<AuthResult>;
+  /** Signs out every other device. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<AuthResult>;
+  /** Makes a new recovery code (the old one stops working) and shows it. */
+  createRecoveryCode: (password: string) => Promise<AuthResult>;
+  signOutOtherDevices: () => Promise<AuthResult>;
 };
 
 export const MIN_PASSWORD = 8;
@@ -131,10 +143,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const startSession = useCallback(async (res: { token: string; user: User }) => {
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+
+  const startSession = useCallback(async (res: { token: string; user: User; recoveryCode?: string }) => {
     await setToken(res.token);
     await cacheUser(res.user);
     setUser(res.user);
+    if (res.recoveryCode) setRecoveryCode(res.recoveryCode);
+  }, []);
+
+  const recover = useCallback(async (username: string, code: string, newPassword: string): Promise<AuthResult> => {
+    try {
+      await startSession(await apiFetch('/api/auth/recover', {
+        body: { username: normalise(username), code, newPassword }, auth: false,
+      }));
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: messageOf(e) };
+    }
+  }, [startSession]);
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<AuthResult> => {
+    try {
+      await apiFetch('/api/auth/password', { body: { currentPassword, newPassword } });
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: messageOf(e) };
+    }
+  }, []);
+
+  const createRecoveryCode = useCallback(async (password: string): Promise<AuthResult> => {
+    try {
+      const r = await apiFetch<{ recoveryCode: string; user: User }>('/api/auth/recovery-code', { body: { password } });
+      setUser(r.user);
+      await cacheUser(r.user);
+      setRecoveryCode(r.recoveryCode);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: messageOf(e) };
+    }
+  }, []);
+
+  const signOutOtherDevices = useCallback(async (): Promise<AuthResult> => {
+    try {
+      await apiFetch('/api/auth/logout-others', { body: {} });
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: messageOf(e) };
+    }
   }, []);
 
   const signup = useCallback(async (username: string, password: string): Promise<AuthResult> => {
@@ -215,7 +271,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, markTutorialSeen, completeOnboarding, setPrivate }}>
+    <AuthContext.Provider value={{
+      user, isLoading, login, signup, logout, markTutorialSeen, completeOnboarding, setPrivate,
+      recoveryCode, dismissRecoveryCode: () => setRecoveryCode(null),
+      recover, changePassword, createRecoveryCode, signOutOtherDevices,
+    }}>
       {children}
     </AuthContext.Provider>
   );

@@ -50,6 +50,8 @@ const list = (f: Fake) => ({
   vote_average: f.vote, vote_count: f.votes, popularity: f.pop, original_language: 'en',
 });
 let tmdbCalls = 0;
+const BREACHED = ['correct horse battery staple', 'Tr0ub4dor&3', 'hunter2hunter2'];
+let pwnedDown = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = new URL(String(input));
@@ -72,6 +74,16 @@ globalThis.fetch = (async (input: any, init?: any) => {
       ];
     });
     return new Response(JSON.stringify({ results: { bindings } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  if (url.hostname === 'api.pwnedpasswords.com') {
+    // Stand-in for Have I Been Pwned: these passwords are "breached"; the rest are not.
+    if (pwnedDown) return new Response('down', { status: 503 });
+    const { createHash } = await import('node:crypto');
+    const prefix = url.pathname.split('/').pop()!.toUpperCase();
+    const lines = BREACHED.map(p => createHash('sha1').update(p).digest('hex').toUpperCase())
+      .filter(h => h.startsWith(prefix)).map(h => `${h.slice(5)}:4242`);
+    lines.push('0000000000000000000000000000000000A:0'); // padding row
+    return new Response(lines.join('\r\n'), { status: 200 });
   }
   if (url.hostname !== 'api.themoviedb.org') return realFetch(input, init);
   tmdbCalls++;
@@ -663,6 +675,64 @@ try {
     const kw = (p: any) => p.keywordW.get(f.kw[0]) ?? 0;
     assert.ok(kw(prof(5)) > kw(prof(4)) && kw(prof(4)) > kw(prof(3)), '5★ should count more than 4★, 4★ more than 3★');
     ok('stars refine the taste profile: 5★ > 4★ > … and 1★ pushes away');
+  }
+
+  // 20. Passwords: weak/breached blocked, change password, recovery codes, sign out elsewhere
+  {
+    const A2 = `${root}/auth`;
+    const su = (username: string, password: string) => call('POST', `${A2}/signup`, { username, password });
+    assert.match((await su('pw_weak1', 'password123')).body.error, /too common/);
+    assert.match((await su('pw_weak2', 'xx_pw_weak2_xx')).body.error, /username/);
+    assert.match((await su('pw_weak3', 'aaaaaaaaaa')).body.error, /too easy/);
+    const breached = await su('pw_weak4', 'correct horse battery staple');
+    assert.equal(breached.status, 400);
+    assert.match(breached.body.error, /data breaches \(4,242 times\)/);
+    pwnedDown = true;
+    assert.equal((await su('pw_offline', 'velvet otter cactus')).status, 201, 'sign-up must not depend on the breach check');
+    pwnedDown = false;
+    ok('weak passwords refused: too common, contains the username, repetitive, or seen in breaches (only a hash prefix is sent; sign-up still works if that check is down)');
+
+    const created = await su('pw_user', 'violet rocket meadow');
+    assert.equal(created.status, 201);
+    const code1 = created.body.recoveryCode as string;
+    assert.match(code1, /^[A-HJ-KM-NP-Z2-9]{4}(-[A-HJ-KM-NP-Z2-9]{4}){3}$/);
+    assert.equal(created.body.user.hasRecoveryCode, true);
+    const t1 = created.body.token as string;
+    const t2 = (await call('POST', `${A2}/login`, { username: 'pw_user', password: 'violet rocket meadow' })).body.token as string;
+
+    const wrong = await call('POST', `${A2}/password`, { currentPassword: 'nope nope nope', newPassword: 'amber falcon river' }, t1);
+    assert.equal(wrong.status, 403, 'a wrong current password must not look like a signed-out session');
+    assert.equal((await call('GET', `${A2}/me`, undefined, t1)).status, 200);
+    assert.equal((await call('POST', `${A2}/password`, { currentPassword: 'violet rocket meadow', newPassword: 'violet rocket meadow' }, t1)).status, 400);
+    assert.match((await call('POST', `${A2}/password`, { currentPassword: 'violet rocket meadow', newPassword: 'hunter2hunter2' }, t1)).body.error, /breaches/);
+    assert.equal((await call('POST', `${A2}/password`, { currentPassword: 'violet rocket meadow', newPassword: 'amber falcon river' }, t1)).status, 200);
+    assert.equal((await call('GET', `${A2}/me`, undefined, t1)).status, 200, 'this device stays signed in');
+    assert.equal((await call('GET', `${A2}/me`, undefined, t2)).status, 401, 'other devices are signed out');
+    assert.equal((await call('POST', `${A2}/login`, { username: 'pw_user', password: 'violet rocket meadow' })).status, 401);
+    assert.equal((await call('POST', `${A2}/login`, { username: 'pw_user', password: 'amber falcon river' })).status, 200);
+    ok('change password: needs the current one, refuses weak ones, signs out every other device');
+
+    assert.equal((await call('POST', `${A2}/recovery-code`, { password: 'wrong wrong wrong' }, t1)).status, 403);
+    const code2 = (await call('POST', `${A2}/recovery-code`, { password: 'amber falcon river' }, t1)).body.recoveryCode as string;
+    assert.notEqual(code2, code1);
+    const rec = (code: string, newPassword: string) => call('POST', `${A2}/recover`, { username: '@PW_USER', code, newPassword });
+    assert.equal((await rec(code1, 'silver lantern bay')).status, 401, 'an old recovery code stops working');
+    const typed = code2.toLowerCase().replace(/-/g, ' ');
+    const back = await rec(typed, 'silver lantern bay');
+    assert.equal(back.status, 200, JSON.stringify(back.body));
+    assert.ok(back.body.token && back.body.recoveryCode && back.body.recoveryCode !== code2);
+    assert.equal((await call('GET', `${A2}/me`, undefined, t1)).status, 401, 'recovering signs out every old session');
+    assert.equal((await rec(code2, 'another fresh phrase')).status, 401, 'a recovery code works once');
+    assert.equal((await call('POST', `${A2}/login`, { username: 'pw_user', password: 'silver lantern bay' })).status, 200);
+    assert.equal((await rec('AAAA-BBBB-CCCC-DDDD', 'silver lantern bay')).status, 401);
+    ok('recovery codes: forgot-password works once per code (typed loosely), issues a new one, signs out old sessions');
+
+    const t3 = back.body.token as string;
+    const t4 = (await call('POST', `${A2}/login`, { username: 'pw_user', password: 'silver lantern bay' })).body.token as string;
+    assert.equal((await call('POST', `${A2}/logout-others`, {}, t3)).status, 200);
+    assert.equal((await call('GET', `${A2}/me`, undefined, t3)).status, 200);
+    assert.equal((await call('GET', `${A2}/me`, undefined, t4)).status, 401);
+    ok('sign out of all other devices');
   }
 
   // 13. Varied first decks + onboarding "show more"

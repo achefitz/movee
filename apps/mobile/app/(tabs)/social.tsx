@@ -402,7 +402,7 @@ export default function SocialScreen() {
                       <Text style={styles.activityTitle} numberOfLines={1}>{event.item.title}</Text>
                       <View style={styles.activityMeta}>
                         <View style={[styles.typeBadge, event.action === 'liked' ? styles.typeBadgeLiked : styles.typeBadgeWatched]}>
-                          <Text style={styles.typeBadgeText}>{event.action === 'liked' ? '❤️ Liked' : '✅ Watched'}</Text>
+                          <Text style={styles.typeBadgeText}>{event.action === 'liked' ? '🔖 To Watch' : '✅ Watched'}</Text>
                         </View>
                         <View style={[styles.mediaBadge, event.item.type === 'movie' ? styles.mediaBadgeMovie : styles.mediaBadgeTV]}>
                           <Text style={styles.mediaBadgeText}>{event.item.type === 'movie' ? 'Movie' : 'TV'}</Text>

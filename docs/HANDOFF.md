@@ -249,3 +249,4 @@ Work happens in a Claude Code cloud session on a checkout of the repo, is tested
 13. Watched titles can be re-rated in the Watchlist (thumbs + 1–5 stars, stars weigh into recommendations); ✓ To Watch → Watched now saves to the account; less top padding on all tabs (web).
 14. Group watch parties: one button in Social, invite up to 6 people, unanimous matches plus most-wanted ranking.
 15. Watchlist search; past watch parties hidden; trailer strip above the title on all cards; HBO Max label; web name "Movee - Discover your next watch".
+16. Login hardening: weak/breached passwords refused (Have I Been Pwned), change password + sign out other devices, recovery codes with Forgot password. "Liked" relabelled "To Watch" on profiles and the feed.

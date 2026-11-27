@@ -9,6 +9,7 @@ import Colors from '@/constants/colors';
 import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { apiFetch } from '@/services/api';
+import { AccountSecurity } from '@/components/AccountSecurity';
 import { TitleGrid } from '@/components/TitleGrid';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -89,7 +90,7 @@ export default function ProfileScreen() {
   const statItems = statList === 'movieLikes' ? savedItems.filter(i => i.type === 'movie')
     : statList === 'tvLikes' ? savedItems.filter(i => i.type === 'tv')
     : statList === 'totalWatched' ? watchedItems : [];
-  const statTitle = statList === 'movieLikes' ? 'Movies you liked' : statList === 'tvLikes' ? 'TV shows you liked' : 'Watched';
+  const statTitle = statList === 'movieLikes' ? 'Movies to watch' : statList === 'tvLikes' ? 'TV shows to watch' : 'Watched';
   const { user, logout, setPrivate } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -257,6 +258,10 @@ export default function ProfileScreen() {
             accessibilityLabel="Private account"
           />
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <AccountSecurity />
       </View>
 
       <View style={styles.section}>

@@ -83,11 +83,20 @@ export default function LoginScreen() {
                 secureTextEntry={!showPassword}
                 returnKeyType="done"
                 onSubmitEditing={handleLogin}
+                autoComplete="current-password"
+                textContentType="password"
               />
               <TouchableOpacity onPress={() => setShowPassword(v => !v)} style={styles.eyeBtn}>
                 <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color={Colors.textMuted} />
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              onPress={() => router.push('/recover')}
+              style={styles.forgotBtn}
+              accessibilityRole="button"
+            >
+              <Text style={styles.forgotText}>Forgot password?</Text>
+            </TouchableOpacity>
           </View>
 
           {error ? (
@@ -170,6 +179,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   inputGroup: { gap: 6 },
+  forgotBtn: { alignSelf: 'flex-end', paddingVertical: 8 },
+  forgotText: { color: Colors.accent, fontSize: 13, fontWeight: '700' },
   inputLabel: {
     fontSize: 13,
     fontWeight: '600',

@@ -5,13 +5,15 @@ export type User = {
   favoriteGenres: number[];
   onboarded: boolean;
   isPrivate: boolean;
+  /** A recovery code is set (the code itself is never stored, only its hash). */
+  hasRecoveryCode: boolean;
   createdAt: number;
 };
 
 export type FollowStatus = 'accepted' | 'pending';
 export type Follow = { user: User; status: FollowStatus; since: number };
 
-export type UserWithHash = User & { passwordHash: string };
+export type UserWithHash = User & { passwordHash: string; recoveryCodeHash: string | null };
 
 export interface AuthStore {
   /** Returns null when the username (case-insensitive) is taken. */
@@ -28,6 +30,10 @@ export interface AuthStore {
   extendSession(tokenHash: string, expiresAt: Date): Promise<void>;
   deleteSession(tokenHash: string): Promise<void>;
   deleteExpiredSessions(): Promise<void>;
+  /** Signs the user out everywhere, except the session `keepTokenHash` if given. */
+  deleteUserSessions(userId: string, keepTokenHash?: string): Promise<void>;
+  setPasswordHash(id: string, passwordHash: string): Promise<void>;
+  setRecoveryCodeHash(id: string, hash: string | null): Promise<void>;
 
   setPrivate(id: string, isPrivate: boolean): Promise<void>;
 
@@ -51,6 +57,7 @@ type UserRow = {
   favoriteGenres: number[];
   onboardedAt: Date | number | null;
   isPrivate: boolean;
+  recoveryCodeHash?: string | null;
   createdAt: Date | number;
 };
 
@@ -61,13 +68,14 @@ const pub = (u: UserRow): User => ({
   favoriteGenres: u.favoriteGenres ?? [],
   onboarded: u.onboardedAt != null,
   isPrivate: !!u.isPrivate,
+  hasRecoveryCode: !!u.recoveryCodeHash,
   createdAt: u.createdAt instanceof Date ? u.createdAt.getTime() : u.createdAt,
 });
 
 // ------------------------------------------------------------------ Postgres
 
 export async function createPgAuthStore(): Promise<AuthStore> {
-  const { db, users, sessions, friends, and, eq, gt, lt } = await import('@movee/db');
+  const { db, users, sessions, friends, and, eq, gt, lt, ne } = await import('@movee/db');
 
   return {
     async createUser(u) {
@@ -79,7 +87,7 @@ export async function createPgAuthStore(): Promise<AuthStore> {
     },
     async findByUsername(username) {
       const [r] = await db.select().from(users).where(eq(users.usernameLower, username.toLowerCase())).limit(1);
-      return r ? { ...pub(r), passwordHash: r.passwordHash } : null;
+      return r ? { ...pub(r), passwordHash: r.passwordHash, recoveryCodeHash: r.recoveryCodeHash ?? null } : null;
     },
     async findById(id) {
       const [r] = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -108,6 +116,17 @@ export async function createPgAuthStore(): Promise<AuthStore> {
     },
     async deleteSession(tokenHash) {
       await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+    },
+    async deleteUserSessions(userId, keep) {
+      await db.delete(sessions).where(keep
+        ? and(eq(sessions.userId, userId), ne(sessions.tokenHash, keep))
+        : eq(sessions.userId, userId));
+    },
+    async setPasswordHash(id, passwordHash) {
+      await db.update(users).set({ passwordHash }).where(eq(users.id, id));
+    },
+    async setRecoveryCodeHash(id, hash) {
+      await db.update(users).set({ recoveryCodeHash: hash }).where(eq(users.id, id));
     },
     async deleteExpiredSessions() {
       await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
@@ -154,7 +173,7 @@ export async function createPgAuthStore(): Promise<AuthStore> {
 // ------------------------------------------------------------------ in-memory (tests, or no DATABASE_URL)
 
 export function createMemoryAuthStore(): AuthStore {
-  const byId = new Map<string, UserRow & { passwordHash: string }>();
+  const byId = new Map<string, UserRow & { passwordHash: string; recoveryCodeHash: string | null }>();
   const sessions = new Map<string, { userId: string; expiresAt: number }>();
   // followerId → followeeId → { status, since }
   const follows = new Map<string, Map<string, { status: FollowStatus; since: number }>>();
@@ -163,13 +182,13 @@ export function createMemoryAuthStore(): AuthStore {
     async createUser(u) {
       const lower = u.username.toLowerCase();
       for (const x of byId.values()) if (x.username.toLowerCase() === lower) return null;
-      const row = { id: u.id, username: u.username, passwordHash: u.passwordHash, hasSeenTutorial: false, favoriteGenres: [] as number[], onboardedAt: null, isPrivate: false, createdAt: Date.now() };
+      const row = { id: u.id, username: u.username, passwordHash: u.passwordHash, recoveryCodeHash: null as string | null, hasSeenTutorial: false, favoriteGenres: [] as number[], onboardedAt: null, isPrivate: false, createdAt: Date.now() };
       byId.set(u.id, row);
       return pub(row);
     },
     async findByUsername(username) {
       const lower = username.toLowerCase();
-      for (const x of byId.values()) if (x.username.toLowerCase() === lower) return { ...pub(x), passwordHash: x.passwordHash };
+      for (const x of byId.values()) if (x.username.toLowerCase() === lower) return { ...pub(x), passwordHash: x.passwordHash, recoveryCodeHash: x.recoveryCodeHash };
       return null;
     },
     async findById(id) { const u = byId.get(id); return u ? pub(u) : null; },
@@ -186,6 +205,11 @@ export function createMemoryAuthStore(): AuthStore {
     },
     async extendSession(tokenHash, expiresAt) { const s = sessions.get(tokenHash); if (s) s.expiresAt = expiresAt.getTime(); },
     async deleteSession(tokenHash) { sessions.delete(tokenHash); },
+    async deleteUserSessions(userId, keep) {
+      for (const [k, s] of sessions) if (s.userId === userId && k !== keep) sessions.delete(k);
+    },
+    async setPasswordHash(id, passwordHash) { const u = byId.get(id); if (u) u.passwordHash = passwordHash; },
+    async setRecoveryCodeHash(id, hash) { const u = byId.get(id); if (u) u.recoveryCodeHash = hash; },
     async deleteExpiredSessions() { for (const [k, s] of sessions) if (s.expiresAt < Date.now()) sessions.delete(k); },
     async setPrivate(id, isPrivate) { const u = byId.get(id); if (u) u.isPrivate = isPrivate; },
     async follow(followerId, followeeId, status) {

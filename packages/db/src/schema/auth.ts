@@ -5,6 +5,8 @@ export const users = pgTable("users", {
   username: text("username").notNull(), // as typed, e.g. "@MovieFan"
   usernameLower: text("username_lower").notNull().unique(), // uniqueness is case-insensitive
   passwordHash: text("password_hash").notNull(),
+  /** scrypt hash of the one-time recovery code (no email on accounts); null = none set. */
+  recoveryCodeHash: text("recovery_code_hash"),
   hasSeenTutorial: boolean("has_seen_tutorial").notNull().default(false),
   /** Private accounts approve each follower before their likes/watches are visible. */
   isPrivate: boolean("is_private").notNull().default(false),
