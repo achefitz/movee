@@ -12,12 +12,14 @@ type Props = {
   muted: boolean;
   onPlaying: () => void;
   onError: () => void;
+  /** Width as a multiple of the container's; the 16:9 video is centered, so extra width crops it. */
+  zoom?: number;
 };
 
 const ORIGIN = 'https://www.youtube.com';
 export const TRAILER_ZOOM = 1.15;
 
-export function WebTrailer({ ytKey, muted, onPlaying, onError }: Props) {
+export function WebTrailer({ ytKey, muted, onPlaying, onError, zoom = TRAILER_ZOOM }: Props) {
   const frame = useRef<HTMLIFrameElement | null>(null);
   const playing = useRef(false);
   const cb = useRef({ onPlaying, onError, muted });
@@ -74,7 +76,7 @@ export function WebTrailer({ ytKey, muted, onPlaying, onError }: Props) {
       position: 'absolute',
       top: '50%',
       left: '50%',
-      width: `${TRAILER_ZOOM * 100}%`,
+      width: `${zoom * 100}%`,
       aspectRatio: '16 / 9',
       transform: 'translate(-50%, -50%)',
       border: 'none',

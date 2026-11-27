@@ -133,6 +133,12 @@ open items) is `docs/HANDOFF.md`.
   thumbs (1–2 👎, 3 👌, 4–5 👍); a thumbs change keeps stars only if they agree. In the taste profile
   `interactionWeight()` uses stars when present (5★ 2.6 … 1★ −1.4) instead of the thumbs weight.
   Titles on both people's Watchlists are pinned to the front of a watch party deck.
+- Watchlist has a search box (title, genre or year; filters the current tab and offers a jump to the
+  other tab's matches). Social lists only current watch parties: finished ones, ones you finished
+  over a day ago, and ones idle 3 days drop off (each vote counts as activity).
+- Party/Discover cards: the trailer strip sits right above the title block (measured with onLayout)
+  and grows up to 4:3 into spare room, cropping the sides; streaming id 1899 is labelled "HBO Max".
+- Web app name: "Movee - Discover your next watch" (`app.json` `web.name`; `shortName` Movee).
 - The TMDB rating is not shown anywhere (IMDb / Rotten Tomatoes only); the min-rating filter still uses it.
 - On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync

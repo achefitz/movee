@@ -105,18 +105,26 @@ async function settle(p: Party): Promise<Party> {
 
 const emptyDeck = 'Nothing matched those streaming services. Try adding more.';
 
-// Your parties: invites, ones you're gathering, in progress, and finished in the last week.
+// Your current parties: invites, ones gathering people, and ones still being swiped.
+// Past parties drop off: finished ones, ones you finished swiping a day ago (others may never
+// finish), and anything with no activity for 3 days. Their page still works from a saved link.
+const STALE_MS = 3 * 24 * 3600_000;
+const AFTER_YOU_FINISH_MS = 24 * 3600_000;
+
 router.get('/', async (req, res, next) => {
   try {
     const me = req.user!.id;
-    const weekAgo = Date.now() - 7 * 24 * 3600_000;
-    const list = (await (await getPartyStore()).listFor(me, 50)).filter(p => {
+    const now = Date.now();
+    const store = await getPartyStore();
+    const open = (await store.listFor(me, 50)).filter(p => {
       const m = p.members.find(x => x.userId === me);
       if (!m || m.status === 'declined' || m.status === 'left') return false;
-      return OPEN.has(p.status) || (p.status === 'done' && p.updatedAt > weekAgo);
+      return OPEN.has(p.status) && now - p.updatedAt < STALE_MS;
     });
+    const summaries = await Promise.all(open.map(p => summary(p, me)));
+    const current = summaries.filter(s => !(s.status === 'active' && s.size > 0 && s.myProgress >= s.size && now - s.updatedAt > AFTER_YOU_FINISH_MS));
     res.set('Cache-Control', 'no-store');
-    res.json({ parties: await Promise.all(list.map(p => summary(p, me))) });
+    res.json({ parties: current });
   } catch (err) { next(err); }
 });
 
@@ -264,7 +272,8 @@ router.post('/:id/vote', async (req, res, next) => {
     const t = tally(p, votes);
     const match = b.data.vote === 'yes' && t.matches.includes(b.data.key);
     const done = joinedIds(p).every(u => votes.filter(v => v.userId === u).length >= p.deck.length);
-    const now = done && p.status === 'active' ? await store.update(p.id, { status: 'done' }) : p;
+    // Every vote counts as activity (keeps it on everyone's list; see STALE_MS).
+    const now = await store.update(p.id, done && p.status === 'active' ? { status: 'done' } : {});
     res.json({ match, party: await summary(now ?? p, me, votes) });
   } catch (err) { next(err); }
 });

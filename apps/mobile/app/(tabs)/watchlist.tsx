@@ -1,6 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
-  StyleSheet, Text, View, FlatList, TouchableOpacity,
+  StyleSheet, Text, View, FlatList, TouchableOpacity, TextInput,
   Platform, Alert, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -162,8 +162,22 @@ export default function WatchlistScreen() {
   const topPad = Platform.OS === 'web' ? Math.max(insets.top, 12) : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
-  const items = activeTab === 'towatch' ? savedItems : watchedItems;
-  const isEmpty = items.length === 0;
+  const [query, setQuery] = useState('');
+  const all = activeTab === 'towatch' ? savedItems : watchedItems;
+  const isEmpty = all.length === 0;
+  // Search within your lists: title, genre or year.
+  const matches = useCallback((i: MediaItem) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return i.title.toLowerCase().includes(q)
+      || i.genreNames.some(g => g.toLowerCase().includes(q))
+      || (!!i.year && i.year.startsWith(q));
+  }, [query]);
+  const items = useMemo(() => all.filter(matches), [all, matches]);
+  const otherTabHits = useMemo(
+    () => (query.trim() ? (activeTab === 'towatch' ? watchedItems : savedItems).filter(matches).length : 0),
+    [query, activeTab, watchedItems, savedItems, matches],
+  );
 
   function confirmRemove(id: number, isSaved: boolean) {
     confirmAction(
@@ -184,7 +198,7 @@ export default function WatchlistScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Watchlist</Text>
         <Text style={styles.headerCount}>
-          {activeTab === 'towatch' ? savedItems.length : watchedItems.length} titles
+          {all.length} {all.length === 1 ? 'title' : 'titles'}
         </Text>
       </View>
 
@@ -215,7 +229,40 @@ export default function WatchlistScreen() {
         </TouchableOpacity>
       </View>
 
-      {isEmpty ? (
+      {!isEmpty && (
+        <View style={styles.searchWrap}>
+          <Ionicons name="search" size={16} color={Colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={`Search your ${activeTab === 'towatch' ? 'watchlist' : 'watched titles'}`}
+            placeholderTextColor={Colors.textMuted}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            accessibilityLabel="Search your watchlist"
+          />
+          {!!query && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {!isEmpty && items.length === 0 ? (
+        <View style={styles.noMatch}>
+          <Text style={styles.emptySubtitle}>Nothing in {activeTab === 'towatch' ? 'To Watch' : 'Watched'} matches “{query.trim()}”.</Text>
+          {otherTabHits > 0 && (
+            <TouchableOpacity onPress={() => setActiveTab(activeTab === 'towatch' ? 'watched' : 'towatch')} accessibilityRole="button">
+              <Text style={styles.switchTab}>
+                {otherTabHits} in {activeTab === 'towatch' ? 'Watched' : 'To Watch'} →
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : isEmpty ? (
         <View style={styles.empty}>
           <Ionicons
             name={activeTab === 'towatch' ? 'bookmark-outline' : 'checkmark-circle-outline'}
@@ -234,6 +281,8 @@ export default function WatchlistScreen() {
       ) : (
         <FlatList
           data={items}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           keyExtractor={(item) => `${item.type}_${item.id}`}
           renderItem={({ item }) => (
             <MediaRow
@@ -262,6 +311,17 @@ export default function WatchlistScreen() {
 }
 
 const styles = StyleSheet.create({
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 6,
+    paddingHorizontal: 12, height: 40, borderRadius: 12, backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  searchInput: {
+    flex: 1, color: Colors.textPrimary, fontSize: 15, height: '100%',
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+  },
+  noMatch: { alignItems: 'center', gap: 10, paddingTop: 40, paddingHorizontal: 32 },
+  switchTab: { color: Colors.accent, fontWeight: '800', fontSize: 14 },
   rowColumn: { flexDirection: 'column', alignItems: 'stretch' },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   ratingBar: {

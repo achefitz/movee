@@ -317,7 +317,11 @@ try {
   assert.deepEqual(done.body.user.favoriteGenres, [27]);
   assert.equal((await call('GET', `${A}/me`, undefined, newbie)).body.user.onboarded, true);
   ok('onboarding answers saved on the account');
-  const nd = (await post('/deck', { userId: 'newbie', limit: 20 })).body.items as any[];
+  // First decks are deliberately randomized (cold start), so judge the lean over three of them.
+  const nd: any[] = [];
+  for (let i = 0; i < 3; i++) {
+    nd.push(...(await post('/deck', { userId: 'newbie', limit: 20, exclude: nd.map(x => x.key) })).body.items);
+  }
   assert.ok(nd.every(i => !favs.includes(i.key)), 'picked favorites shown again in the deck');
   const horrorShare = nd.filter(i => byKey.get(i.key)!.genres.includes(27)).length / nd.length;
   const coldShare = d1.filter(i => byKey.get(i.key)!.genres.includes(27)).length / d1.length;
@@ -604,6 +608,8 @@ try {
     assert.equal(last.party.status, 'done');
     assert.deepEqual(last.party.matches, [keys[0]]);
     assert.ok(last.party.members.filter((m: any) => m.status === 'joined').every((m: any) => m.progress === 30));
+    assert.ok(!(await call('GET', P, undefined, hostT)).body.parties.some((p: any) => p.id === id), 'finished parties drop off the list');
+    assert.equal((await call('GET', `${P}/${id}`, undefined, hostT)).body.party.status, 'done', 'but their results page still works');
     ok('match = every joined member says yes (shown at once); yes-counts rank the rest; done when all finish');
 
     // Host starts early; a late joiner can still swipe; the host can call it off.

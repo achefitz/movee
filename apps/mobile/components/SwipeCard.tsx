@@ -47,6 +47,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
   const [trailerError, setTrailerError] = useState(false);
   const [stopped, setStopped] = useState(false); // user closed the trailer on this card
   const [videoVisible, setVideoVisible] = useState(false); // fades in once actually playing
+  const [infoH, setInfoH] = useState(0); // height of the title/ratings block, to place the trailer above it
   const [cardSize, setCardSize] = useState({ width: W, height: H * 0.7 });
   const isDragging = useRef(false);
   const leaving = useRef(false);
@@ -198,12 +199,17 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
   // Autoplay the top card's trailer; the poster stays until the video is really playing.
   const playTrailer = isTop && !!trailerKey && !trailerError && !stopped;
   const showingVideo = playTrailer && videoVisible;
-  // The trailer plays at full card width in a 2:1 strip above the title, over a dimmed,
-  // blurred poster, instead of being zoomed to fill the whole card (which blew up on-screen
-  // text and showed the letterbox bars).
-  const bandH = Math.round(cardSize.width / 2);
-  const bandTop = Math.max(14, Math.round((cardSize.height * 0.58 - bandH) / 2));
-  const controlsTop = bandTop >= 64 ? 14 : bandTop + bandH + 10;
+  // The trailer plays at full card width right above the title, over a dimmed, blurred poster.
+  // It grows (up to 4:3) to use the room a tall card has, cropping the sides rather than
+  // leaving an empty gap; never zoomed to fill the whole card (that blew up on-screen text).
+  const W_ = cardSize.width;
+  const infoBottom = infoH ? infoH + 24 + 12 : cardSize.height * 0.42; // gradient padding + gap
+  const room = cardSize.height - infoBottom - 14;
+  const bandH = Math.round(Math.min(Math.max(room, W_ / 2), W_ * 0.75));
+  const bandTop = Math.max(14, Math.round(cardSize.height - infoBottom - bandH));
+  // Wide enough that the 16:9 video covers the band (plus a little to trim letterbox bars).
+  const trailerZoom = Math.max(TRAILER_ZOOM, ((bandH * 16) / 9 / Math.max(1, W_)) * 1.08);
+  const controlsTop = bandTop + 10;
   const lbUrl = letterboxdUrl(item);
 
   const streamingBadges = (item.streamingIds || [])
@@ -242,6 +248,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
               <WebTrailer
                 ytKey={trailerKey!}
                 muted={muted}
+                zoom={trailerZoom}
                 onPlaying={() => setVideoVisible(true)}
                 onError={() => { setTrailerError(true); setVideoVisible(false); }}
               />
@@ -251,7 +258,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
                 isMuted={muted}
                 width={cardSize.width}
                 height={bandH}
-                zoom={TRAILER_ZOOM}
+                zoom={Math.max(TRAILER_ZOOM, 1.08)}
                 onPlaying={() => setVideoVisible(true)}
                 onError={() => { setTrailerError(true); setVideoVisible(false); }}
               />
@@ -263,6 +270,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
           colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.97)']}
           style={styles.gradient}
         >
+          <View onLayout={e => setInfoH(Math.round(e.nativeEvent.layout.height))}>
           <View style={styles.topBadgesRow}>
             <View style={styles.typeBadge}>
               <Text style={styles.typeBadgeText}>{item.type === 'movie' ? 'MOVIE' : 'TV'}</Text>
@@ -342,6 +350,7 @@ export const SwipeCard = forwardRef<SwipeCardHandle, SwipeCardProps>(function Sw
               )}
             </View>
           )}
+          </View>
         </LinearGradient>
 
         {isTop && !!trailerKey && !trailerError && stopped && (

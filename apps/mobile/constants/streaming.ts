@@ -12,7 +12,7 @@ export const SVC: Record<number, StreamingService> = {
   350:  { name: 'Apple TV+',   color: '#A2AAAD', url: 'https://tv.apple.com' },
   386:  { name: 'Peacock',     color: '#00A2E8', url: 'https://www.peacocktv.com' },
   531:  { name: 'Paramount+',  color: '#0064FF', url: 'https://www.paramountplus.com' },
-  1899: { name: 'Max',         color: '#002BE7', url: 'https://www.max.com' },
+  1899: { name: 'HBO Max',     color: '#002BE7', url: 'https://www.hbomax.com' },
   2:    { name: 'Apple TV',    color: '#A2AAAD', url: 'https://tv.apple.com' },
   10:   { name: 'Amazon',      color: '#FF9900', url: 'https://www.amazon.com/Prime-Video' },
   283:  { name: 'Crunchyroll',  color: '#F47521', url: 'https://www.crunchyroll.com' },
@@ -30,5 +30,5 @@ export const STREAMING_FILTER_LIST = [
   { id: 350,  name: 'Apple TV+' },
   { id: 386,  name: 'Peacock' },
   { id: 531,  name: 'Paramount+' },
-  { id: 1899, name: 'Max' },
+  { id: 1899, name: 'HBO Max' },
 ];
