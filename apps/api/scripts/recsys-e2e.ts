@@ -223,7 +223,7 @@ try {
   console.log(`    sci-fi share: deck1 ${(share(d1) * 100).toFixed(0)}% → deck2 ${(share(d2) * 100).toFixed(0)}% (liked ${sciFiLikes.length} sci-fi, skipped the rest)`);
   if (sciFiLikes.length) {
     assert.ok(share(d2) > share(d1), 'deck did not shift toward liked genre');
-    assert.ok(d2.some(i => /^Because you liked /.test(i.reason ?? '')), 'no "Because you liked" reason');
+    assert.ok(d2.some(i => /^Because you (saved|loved|watched) /.test(i.reason ?? '')), 'no "Because you …" reason');
     ok('deck shifts toward liked genre and explains why');
   }
 
@@ -537,7 +537,7 @@ try {
     ok(`search adds weigh ${SEARCH_BOOST}x and seed recs first; opened results nudge taste without counting as seen`);
   }
   const srDeck = (await post('/deck', { userId: 'searcher', limit: 20 })).body.items as any[];
-  assert.ok(srDeck.some(i => i.reason === `Because you liked Movie ${sq.id}`), 'deck should build on the title added from search');
+  assert.ok(srDeck.some(i => i.reason === `Because you saved Movie ${sq.id}`), 'deck should build on the title added from search (and say "saved")');
   ok('the next deck builds on what you added from search');
 
   // 18. Group watch parties

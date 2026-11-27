@@ -13,7 +13,7 @@ import { buildProfile, canonicalGenres, noveltyTest } from './profile';
 import { MIN_TRAINING_ROWS, trainRanker, type EnsembleModel, type Ranker, type TrainReport, type TrainingRow } from './ranker';
 import { buildGlobalStats, emptyStats, type GlobalStats } from './stats';
 import type { RecsStore } from './store';
-import { actionForStars, DEFAULT_FILTERS, yearOf, type Action, type CatalogItem, type DeckFilters, type InteractionSource } from './types';
+import { actionForStars, DEFAULT_FILTERS, yearOf, type Action, type CatalogItem, type DeckFilters, type Interaction, type InteractionSource, type SearchClick } from './types';
 
 type Log = { info: (o: object, m: string) => void; warn: (o: object, m: string) => void; error: (o: object, m: string) => void };
 
@@ -94,6 +94,22 @@ function ratingsOf(it: CatalogItem) {
     rtScore: it.rt?.score ?? undefined,
     rtUrl: it.rt?.url ?? undefined,
   };
+}
+
+/**
+ * How to describe the title a recommendation came from ("Because you … X"), from what the
+ * user actually did with it: saved it to their Watchlist, loved it (4–5★ or 👍), watched it,
+ * or only opened it in Search.
+ */
+function reasonVerbs(history: Interaction[], clicks: SearchClick[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const c of clicks) m.set(c.itemKey, 'looked up');
+  for (const h of history) {
+    if (h.action === 'like') m.set(h.itemKey, 'saved');
+    else if (h.action === 'seen_up' || (h.stars ?? 0) >= 4) m.set(h.itemKey, 'loved');
+    else if (h.action.startsWith('seen')) m.set(h.itemKey, 'watched');
+  }
+  return m;
 }
 
 /** Catalog item in the app's MediaItem shape. */
@@ -235,7 +251,8 @@ export class RecsService {
     const ranked = rerank(second, profile.n, limit, isNovel) as Array<Scored & { cand: Candidate }>;
 
     await this.refreshRottenTomatoes(ranked.map(s => s.item));
-    const out = ranked.map(s => this.toDeckItem({ ...s, item: this.catalog.known.get(s.item.key) ?? s.item }, histItems));
+    const verbs = reasonVerbs(history, clicks);
+    const out = ranked.map(s => this.toDeckItem({ ...s, item: this.catalog.known.get(s.item.key) ?? s.item }, histItems, verbs));
     await this.store.logImpressions(ranked.map((s, i) => ({
       id: out[i].impressionId,
       userId,
@@ -248,12 +265,16 @@ export class RecsService {
     return out;
   }
 
-  private toDeckItem(s: Scored & { cand: Candidate }, histItems: Map<string, CatalogItem>): DeckItem {
+  private toDeckItem(
+    s: Scored & { cand: Candidate },
+    histItems: Map<string, CatalogItem>,
+    verbs: Map<string, string> = new Map(),
+  ): DeckItem {
     const it = s.item;
     let reason: string | undefined;
     const because = s.cand.becauseOf && (histItems.get(s.cand.becauseOf) ?? this.catalog.known.get(s.cand.becauseOf));
     if (s.explore) reason = 'Something different';
-    else if (because) reason = `Because you liked ${because.title}`;
+    else if (because) reason = `Because you ${verbs.get(because.key) ?? 'liked'} ${because.title}`;
     else if (s.cand.sources.toprated && s.cand.sources.toprated.rank < 15 && it.voteAverage >= 8 && it.voteCount >= 1000) reason = 'Critically acclaimed';
     else if (s.cand.sources.popular && s.cand.sources.popular.rank < 15) reason = 'Trending now';
 

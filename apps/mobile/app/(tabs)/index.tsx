@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   StyleSheet, Text, View, TouchableOpacity,
-  ActivityIndicator, Platform, Modal,
+  ActivityIndicator, Platform, Modal, Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,47 +25,54 @@ const MUTE_KEY = 'movee.trailerMuted';
 const FIRST_PAGE = 15;
 const NEXT_PAGE = 20;
 
+const STAR_LABELS = ['', 'Hated it', 'Not great', 'It was OK', 'Liked it', 'Loved it'];
+
+/** "How was it?" after swiping up: 1–5 stars (same scale as the Watchlist). Tap a star to rate. */
 function RatingPrompt({
   item,
   onRate,
   onSkip,
 }: {
   item: MediaItem;
-  onRate: (rating: 'up' | 'meh' | 'down') => void;
+  onRate: (stars: number) => void;
   onSkip: () => void;
 }) {
+  const [hover, setHover] = useState(0);
+  const [picked, setPicked] = useState(0);
+  const shown = picked || hover;
+  const pick = (n: number) => {
+    if (picked) return;
+    setPicked(n);
+    setTimeout(() => onRate(n), 280); // let the stars fill before the sheet closes
+  };
   return (
     <Modal visible transparent animationType="fade">
       <View style={promptStyles.overlay}>
         <View style={promptStyles.sheet}>
           <Text style={promptStyles.title}>How was it?</Text>
           <Text style={promptStyles.subtitle} numberOfLines={1}>{item.title}</Text>
-          <View style={promptStyles.buttons}>
-            <TouchableOpacity
-              style={[promptStyles.rateBtn, promptStyles.downBtn]}
-              onPress={() => onRate('down')}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="thumbs-down" size={26} color="#E74C3C" />
-              <Text style={[promptStyles.rateBtnText, { color: '#E74C3C' }]}>Not great</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[promptStyles.rateBtn, promptStyles.mehBtn]}
-              onPress={() => onRate('meh')}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="thumbs-up" size={26} color="#F5C518" style={{ transform: [{ rotate: '90deg' }] }} />
-              <Text style={[promptStyles.rateBtnText, { color: '#F5C518' }]}>It was OK</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[promptStyles.rateBtn, promptStyles.upBtn]}
-              onPress={() => onRate('up')}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="thumbs-up" size={26} color="#2ECC71" />
-              <Text style={[promptStyles.rateBtnText, { color: '#2ECC71' }]}>Loved it</Text>
-            </TouchableOpacity>
+          <View style={promptStyles.stars}>
+            {[1, 2, 3, 4, 5].map(n => (
+              <Pressable
+                key={n}
+                onPress={() => pick(n)}
+                onHoverIn={() => setHover(n)}
+                onHoverOut={() => setHover(0)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`${n} star${n === 1 ? '' : 's'}: ${STAR_LABELS[n]}`}
+              >
+                <Ionicons
+                  name={n <= shown ? 'star' : 'star-outline'}
+                  size={44}
+                  color={n <= shown ? Colors.accent : Colors.textMuted}
+                />
+              </Pressable>
+            ))}
           </View>
+          <Text style={[promptStyles.caption, !shown && promptStyles.captionIdle]}>
+            {shown ? STAR_LABELS[shown] : 'Tap a star'}
+          </Text>
           <TouchableOpacity onPress={onSkip} hitSlop={8}>
             <Text style={promptStyles.skip}>Skip</Text>
           </TouchableOpacity>
@@ -92,60 +99,19 @@ const promptStyles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: Colors.border,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: Colors.textMuted,
-    maxWidth: '80%',
-    textAlign: 'center',
-  },
-  buttons: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
-  },
-  rateBtn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 16,
-    borderWidth: 2,
-    gap: 6,
-  },
-  downBtn: {
-    borderColor: '#E74C3C',
-    backgroundColor: 'rgba(231,76,60,0.1)',
-  },
-  mehBtn: {
-    borderColor: '#F5C518',
-    backgroundColor: 'rgba(245,197,24,0.1)',
-  },
-  upBtn: {
-    borderColor: '#2ECC71',
-    backgroundColor: 'rgba(46,204,113,0.1)',
-  },
-  rateBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  skip: {
-    color: Colors.textMuted,
-    fontSize: 14,
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-  },
+  title: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary },
+  subtitle: { fontSize: 14, color: Colors.textMuted, maxWidth: '80%', textAlign: 'center' },
+  stars: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  caption: { color: Colors.accent, fontSize: 15, fontWeight: '800', minHeight: 20 },
+  captionIdle: { color: Colors.textMuted, fontWeight: '600' },
+  skip: { color: Colors.textMuted, fontSize: 15, marginTop: 4 },
 });
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
   const {
     filters, setFilters,
-    recordSwipe, markWatched, undoLastSwipe, rateWatched, watchedRatings,
+    recordSwipe, markWatched, undoLastSwipe, changeRating, watchedRatings,
     savedItems, skippedItems, watchedItems, cacheDeckItems,
   } = useAppContext();
   const { user } = useAuth();
@@ -478,9 +444,10 @@ export default function DiscoverScreen() {
       {pendingRatingItem && (
         <RatingPrompt
           item={pendingRatingItem}
-          onRate={(rating) => {
-            rateWatched(pendingRatingItem.id, rating);
-            sendSwipe(pendingRatingItem, `seen_${rating}`);
+          onRate={(stars) => {
+            // Same 1–5 stars as the Watchlist: sets the matching thumbs too (1–2 👎, 3 👌, 4–5 👍),
+            // and keeps the swipe's link to the card it was shown on (training data).
+            changeRating(pendingRatingItem, { stars });
             setPendingRatingItem(null);
           }}
           onSkip={() => setPendingRatingItem(null)}

@@ -12,7 +12,7 @@ export type Source = typeof SOURCES[number];
 export type Candidate = {
   key: string;
   sources: Partial<Record<Source, { rank: number; score: number }>>;
-  /** Item that pulled this candidate in (for "Because you liked X"). */
+  /** Item that pulled this candidate in (for "Because you saved / loved / watched X"). */
   becauseOf?: string;
 };
 

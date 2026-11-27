@@ -154,6 +154,11 @@ open items) is `docs/HANDOFF.md`.
 - Party/Discover cards: the trailer strip sits right above the title block (measured with onLayout)
   and grows up to 4:3 into spare room, cropping the sides; streaming id 1899 is labelled "HBO Max".
 - Web app name: "Movee - Discover your next watch" (`app.json` `web.name`; `shortName` Movee).
+- Discover's "How was it?" (after swipe up) is 1–5 stars (`RatingPrompt` in `app/(tabs)/index.tsx`) → `changeRating`
+  (`/api/recs/rate`), same scale and thumbs mapping as the Watchlist; Skip leaves it as plain "seen".
+- Deck reasons: `cand.becauseOf` is the seed (search add, opened search result, or recent positive) whose
+  co-visitation / i2i contribution was largest; the label says what you did with it (`reasonVerbs` in
+  `service.ts`): "Because you saved / loved / watched / looked up X".
 - The TMDB rating is not shown anywhere (IMDb / Rotten Tomatoes only); the min-rating filter still uses it.
 - On web, `Alert.alert` with buttons does nothing: use `utils/confirm.ts` `confirmAction()`.
 - `services/recs.ts`: deck fetch, persisted feedback queue (swipes survive offline), one-time sync
